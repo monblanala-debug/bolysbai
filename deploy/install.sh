@@ -57,10 +57,11 @@ systemctl daemon-reload
 systemctl enable --now cargo151
 systemctl restart cargo151
 
+NAMES="${DOMAIN:+$DOMAIN www.$DOMAIN}"; NAMES="${NAMES:-_}"
 cat > /etc/nginx/sites-available/cargo151 <<EOF
 server {
   listen 80;
-  server_name ${DOMAIN:+$DOMAIN www.$DOMAIN}${DOMAIN:-_};
+  server_name $NAMES;
   client_max_body_size 10m;
   location / {
     proxy_pass http://127.0.0.1:3000;
