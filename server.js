@@ -176,20 +176,16 @@ app.get('/address', (req, res) => {
   const client = currentClient(req);
   if (!client) return res.redirect('/');
   const whs = activeWarehouses();
-  const w = whs.find((x) => x.id === parseInt(req.query.wh, 10));
+  // По умолчанию открыт первый склад (Гуанчжоу); переключатель сверху меняет склад одним касанием.
+  const w = whs.find((x) => x.id === parseInt(req.query.wh, 10)) || whs[0];
   const note = (x) => (req.lang === 'zh' ? x.note_zh : x.note_ru);
   const hours = (x) => (req.lang === 'zh' ? x.hours_zh : x.hours_ru);
-  if (!w) {
-    return res.render(t('choose_wh'), `<div class="narrow">${steps(t, 2)}${codeBanner(req, client)}<div class="card"><h1>${esc(t('choose_wh'))}</h1>
-      <div class="wh-list">${whs.map((x) => `<a class="wh" href="/address?wh=${x.id}"><b>${esc(whName(req.lang, x))}</b>${note(x) ? `<span>${esc(note(x))}</span>` : ''}<span class="muted">🕘 ${esc(hours(x))}</span></a>`).join('')}</div>
-      ${notice(req)}${keepers(req, whs)}
-      </div></div>`);
-  }
+  if (!w) return res.redirect('/');
+  const seg = whs.length > 1 ? `<div class="seg" role="tablist">${whs.map((x) => `<a role="tab" href="/address?wh=${x.id}" class="${x.id === w.id ? 'on' : ''}" aria-selected="${x.id === w.id}">${esc(whName(req.lang, x))}</a>`).join('')}</div>` : '';
   const f = addressFields(w, client);
   const row = (id, label, value) => `<div class="field"><div><div class="muted">${esc(label)}</div><div class="val" id="${id}">${esc(value)}</div></div>${copyBtn(t, id)}</div>`;
   res.render(t('china_address'), `<div class="narrow">${steps(t, 2)}${codeBanner(req, client)}<div class="card">
-    <div class="row" style="align-items:center"><h1 style="margin:0">${esc(t('warehouse'))}: ${esc(whName(req.lang, w))}</h1>
-      <a href="/address" class="btn sec sm" style="flex:0 0 auto">${esc(t('change_wh'))}</a></div>
+    <h1 style="margin:0 0 4px">${esc(t('china_address'))}</h1><p class="muted" style="margin:0 0 10px">${esc(t('wh_switch_hint'))}</p>${seg}
     <p class="muted">🕘 ${esc(t('hours'))}: ${esc(hours(w))}</p>
     ${note(w) ? `<div class="alert warn">${esc(note(w))}</div>` : ''}
     <div class="addr" id="addr-all">${esc(f.all)}</div>
@@ -199,7 +195,7 @@ app.get('/address', (req, res) => {
     ${row('f-n', t('receiver'), f.name)}${row('f-p', t('receiver_phone'), f.phone)}${row('f-a', t('address'), f.address)}
     <p class="muted">${esc(t('rules'))}</p>
     ${keepers(req, whs)}
-    </div>
+    </div>${notice(req)}
     <div class="card"><h3>${esc(t('pickup'))}${client.city_name ? ' · ' + esc(client.city_name) : ''}</h3>
       <div class="addr">${esc(client.pickup_address || '—')}</div>
       <p><a class="btn sec" href="/cabinet">${esc(t('goto_cabinet'))}</a></p></div></div>`);
