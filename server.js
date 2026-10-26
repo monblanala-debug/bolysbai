@@ -13,6 +13,8 @@ const ACCOUNTANT_PASSWORD = process.env.ACCOUNTANT_PASSWORD || 'buh151';
 const PORT = process.env.PORT || 3000;
 const LEGACY_TRACK_URL = 'http://151.likerj.com';
 const isOwner = (req) => req.session.admin === 'owner';
+// Код для людей: цифровые коды пишем с D (D1600), старые буквенные (Y58, AB016) как есть.
+const dispCode = (code) => (/^\d/.test(code) ? `D${code}` : code);
 
 const app = express();
 app.set('trust proxy', 1);
@@ -232,10 +234,11 @@ app.get('/track', (req, res) => {
 
 function invoicesTable(t, invoices, base) {
   if (!invoices.length) return `<p class="muted">${esc(t('no_invoices'))}</p>`;
-  return `<div class="tbl"><table><tr><th>${esc(t('invoice_no'))}</th><th>${esc(t('date'))}</th><th>${esc(t('total_weight'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th></tr>
-  ${invoices.map((i) => `<tr><td>${esc(i.number)}</td><td>${esc(fmtDate(i.created_at))}</td><td>${i.total_weight}</td><td>${esc(money(i.amount))}</td>
-  <td>${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
-  <td><a href="${base}${i.id}">${esc(t('open'))}</a></td></tr>`).join('')}</table></div>`;
+  return `<div class="tbl"><table><tr><th>${esc(t('date'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('inv_cargo'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th></tr>
+  ${invoices.map((i) => `<tr><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b>${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}</td>
+  <td>${esc(cargoSummary(t, i))}</td><td><b>${esc(money(i.amount))}</b></td>
+  <td>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
+  <td><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a></td></tr>`).join('')}</table></div>`;
 }
 
 app.get('/cabinet', (req, res) => {
@@ -270,19 +273,55 @@ app.post('/cabinet/login', (req, res) => {
   res.redirect('/cabinet');
 });
 
+// Накладная повторяет бумажный 货运单: подписи на двух языках сразу, внизу правила перевозки.
+const num = (v) => (v ? String(Math.round(v * 1000) / 1000) : '0');
+const fmtDay = (s) => (s ? String(s).slice(0, 10).split('-').reverse().join('.') : '');
+const cargoSummary = (t, i) => [i.goods, i.pieces ? `${i.pieces} ${t('inv_pcs')}` : '', i.total_weight ? `${num(i.total_weight)} ${t('kg')}` : '', i.volume ? `${num(i.volume)} м³` : '']
+  .filter(Boolean).join(' · ');
+// «3.13到» из таблицы склада → «Прибыл 13.03».
+const cargoStatus = (t, s) => String(s || '').trim().replace(/^(\d{1,2})\.(\d{1,2})\s*到$/, (m, mo, d) => `${t('inv_arrived')} ${d.padStart(2, '0')}.${mo.padStart(2, '0')}`);
+const CITY_ZH = { Алматы: '阿拉木图', Москва: '莫斯科', Бишкек: '比什凯克' };
+const INV_HEAD = [
+  ['origin', '始发地', 'Пункт вылета'], ['destination', '目的地', 'Пункт назначения'], ['transport', '运输方式', 'Способ перевозки'],
+  ['number', '货号', 'Код груза'], ['delivery_time', '运输时间', 'Время доставки'], ['inv_date', '发货日期', 'Дата отправки'],
+  ['sender', '发货人', 'Грузоотправитель'], ['consignee', '提货联系电话', 'Грузополучатель'],
+];
+const INV_GOODS = [
+  ['goods', '品名', 'Перечень товаров'], ['pieces', '件数', 'Количество'], ['total_weight', '重量', 'Вес'], ['volume', '体积', 'Объём'],
+  ['rate', '单价', 'Цена'], ['freight', '运费 $', 'Фрахт'], ['goods_value', '货值 $', 'Стоимость товара'], ['ins_rate', '保率 (%)', 'Страховка %'],
+  ['ins_fee', '保险费 $', 'Страховка $'], ['packing', '打包方式', 'Упаковка'], ['pack_fee', '包装费 $', 'Плата за упаковку'],
+  ['advance', '垫付款 $', 'Перевод на заказ'], ['unload_fee', '落地费 $', 'Плата за разгрузку'], ['other_fee', '其他款项 $', 'Другие платежи'],
+];
+const NUM_FIELDS = ['pieces', 'total_weight', 'volume', 'rate', 'freight', 'goods_value', 'ins_rate', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee'];
+const FEES = ['freight', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee'];
+
+function invoiceValue(inv, k) {
+  if (k === 'inv_date') return fmtDay(inv.inv_date || inv.created_at);
+  if (k === 'rate') return inv.rate ? `${num(inv.rate)}${inv.price_basis === 'kg' ? ' /кг' : ' /м³'}` : '0';
+  if (k === 'ins_rate') return `${num(inv.ins_rate)}%`;
+  return NUM_FIELDS.includes(k) ? num(inv[k]) : inv[k] || '';
+}
+
 function invoicePage(req, inv) {
   const t = req.t;
-  const client = getClient(inv.client_id);
-  const parcels = db.prepare('SELECT * FROM parcels WHERE invoice_id = ? ORDER BY id').all(inv.id);
-  return `<div class="card"><div class="row" style="align-items:start"><div><h1>${esc(t('invoice'))} № ${esc(inv.number)}</h1>
-    <div class="muted">${esc(fmtDate(inv.created_at))}</div></div>
-    <div style="text-align:right">${inv.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</div></div>
-    <p><b>${esc(t('client'))}:</b> ${esc(client.name)} · ${esc(client.code)}${req.session.admin === 'accountant' ? '' : ` · +${esc(client.phone)}`} · ${esc(client.city_name || '')}</p>
-    <div class="tbl"><table><tr><th>#</th><th>${esc(t('track'))}</th><th>${esc(t('description'))}</th><th>${esc(t('places'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('amount'))}</th></tr>
-    ${parcels.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.track)}</td><td>${esc(p.description)}</td><td>${p.places}</td><td>${p.weight}</td><td>${esc(money(p.weight * inv.rate))}</td></tr>`).join('')}
-    <tr><th colspan="4">${esc(t('total'))}</th><th>${inv.total_weight}</th><th>${esc(money(inv.amount))}</th></tr></table></div>
-    <p>${esc(t('rate'))}: ${esc(money(inv.rate))}${inv.note ? `<br>${esc(t('note'))}: ${esc(inv.note)}` : ''}</p>
-    <p class="noprint"><button type="button" onclick="print()">${esc(t('print'))}</button></p></div>`;
+  const cell = ([k, zh, ru]) => `<div class="c"><div class="l">${esc(zh)}<br>${esc(ru)}</div><div class="v">${esc(invoiceValue(inv, k))}</div></div>`;
+  const rules = String(setting('invoice_rules') || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const parcels = db.prepare('SELECT track FROM parcels WHERE invoice_id = ? ORDER BY id').all(inv.id);
+  return `<div class="row noprint" style="align-items:center;margin-bottom:12px"><a href="${req.session.admin ? '/admin/invoices' : '/cabinet'}">← ${esc(t('back'))}</a>
+    <span style="margin-left:auto">${inv.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</span>
+    <button type="button" class="sec" onclick="print()" style="flex:0 0 auto">${esc(t('print'))}</button></div>
+  <div class="wb">
+    <div class="wb-top"><img src="/logo.png" alt="Карго 151"><div><div class="co">${esc(setting('invoice_company'))}</div><div class="ti">${esc(setting('invoice_title'))}</div></div></div>
+    <div class="g head">${INV_HEAD.map(cell).join('')}</div>
+    <div class="g goods">${INV_GOODS.map(cell).join('')}</div>
+    <div class="g sum"><div class="c"><div class="l">备注<br>Замечание</div><div class="v">${esc(inv.note || '')}</div></div>
+      <div class="c"><div class="l">总计<br>Сумма</div><div class="v big">${esc(money(inv.amount))}</div></div></div>
+    ${inv.cargo_status ? `<div class="wb-tracks"><b>运踪 · ${esc(t('inv_cargo_status'))}:</b> ${esc(cargoStatus(t, inv.cargo_status))}</div>` : ''}
+    ${parcels.length ? `<div class="wb-tracks"><b>${esc(t('track'))}:</b> ${parcels.map((p) => esc(p.track)).join(', ')}</div>` : ''}
+    <div class="wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
+      ${rules.map((l, i) => (i === 0 && !/^\d/.test(l) ? `<p><b>${esc(l)}</b></p>` : `<p>${esc(l)}</p>`)).join('')}</div>
+  </div>
+  <p class="muted" style="font-size:13px">${esc(t('inv_rules_agree'))}</p>`;
 }
 
 app.get('/invoice/:id', (req, res) => {
@@ -339,9 +378,25 @@ app.get('/admin/clients', (req, res) => {
   const rows = db.prepare(`SELECT c.*, ci.name city_name, (SELECT COUNT(*) FROM parcels p WHERE p.client_id = c.id) pc
     FROM clients c LEFT JOIN cities ci ON ci.id = c.city_id
     WHERE ? = '' OR c.code LIKE ? OR c.name LIKE ? OR (? AND c.phone LIKE ?) ORDER BY c.id DESC LIMIT 300`).all(q, like, like, owner ? 1 : 0, like);
+  const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   adminRender(req, res, t('a_clients'), `<div class="card"><form class="row"><div><input name="q" value="${esc(q)}" placeholder="${esc(t('code'))} / ${esc(t('name'))}${owner ? ' / ' + esc(t('phone')) : ''}"></div><button>${esc(t('search'))}</button></form></div>
+  <details class="card" id="add" ${req.query.code ? 'open' : ''}><summary><b>${esc(t('a_add_client'))}</b></summary><p class="muted">${esc(t('a_add_client_hint'))}</p>
+    <form method="post" action="/admin/clients/add" class="row"><div><label>${esc(t('code'))}</label><input name="code" required value="${esc(req.query.code || '')}" placeholder="D185"></div>
+    <div><label>${esc(t('name'))}</label><input name="name" required></div><div><label>WhatsApp</label><input name="phone" type="tel" required></div>
+    <div><label>${esc(t('city'))}</label><select name="city_id">${cities.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><button>${esc(t('add'))}</button></form></details>
   <div class="card tbl"><table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('city'))}</th><th>${esc(t('parcels_count'))}</th><th>${esc(t('registered'))}</th></tr>
   ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(r.code)}</b></a></td><td>${esc(r.name)}</td>${owner ? `<td><a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a></td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td><td>${esc(fmtDate(r.created_at))}</td></tr>`).join('')}</table></div>`);
+});
+
+app.post('/admin/clients/add', (req, res) => {
+  const code = String(req.body.code || '').trim().toUpperCase().replace(/^D(?=\d)/, '').replace(/-\d{4}$/, '');
+  const phone = normPhone(req.body.phone); const name = String(req.body.name || '').trim().slice(0, 80);
+  const cityId = parseInt(req.body.city_id, 10) || null;
+  if (!code || !name || phone.length < 10) { req.session.flash = req.t('a_add_client_err'); return res.redirect('/admin/clients#add'); }
+  if (db.prepare('SELECT 1 FROM clients WHERE code = ? OR phone = ?').get(code, phone)) { req.session.flash = req.t('a_add_client_dup'); return res.redirect('/admin/clients#add'); }
+  const r = db.prepare('INSERT INTO clients (code, name, phone, city_id, legacy) VALUES (?, ?, ?, ?, 1)').run(code, name, phone, cityId);
+  linkOrphanParcels(r.lastInsertRowid, code);
+  res.redirect(`/admin/clients/${r.lastInsertRowid}`);
 });
 
 app.get('/admin/clients/:id', (req, res) => {
@@ -422,7 +477,13 @@ app.get('/admin/import', (req, res) => {
   adminRender(req, res, t('a_import'), `<div class="card"><h2>${esc(t('a_import'))}</h2><p class="muted">${esc(t('a_import_hint'))}</p>
     <form method="post" action="/admin/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div>
     <div><label>${esc(t('status'))}</label><select name="default_status">${statusOptions(t, 'china')}</select></div><button>${esc(t('a_upload'))}</button></form>
-    <p><a href="/admin/template.xlsx">${esc(t('a_template'))}</a></p></div>`);
+    <p><a href="/admin/template.xlsx">${esc(t('a_template'))}</a></p></div>
+    <div class="card" id="inv"><h2>${esc(t('a_inv_import'))}</h2><p class="muted">${esc(t('a_inv_import_hint'))}</p>
+    <form method="post" action="/admin/import-invoices" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div>
+    <div><label>${esc(t('a_inv_default_date'))}</label><input type="date" name="inv_date" value="${new Date().toISOString().slice(0, 10)}"></div>
+    <div><label>始发地 · Пункт вылета</label><select name="origin">${activeWarehouses().map((x) => `<option>${esc(`${x.name_zh}/${x.name_ru}`)}</option>`).join('')}</select></div>
+    <button>${esc(t('a_upload'))}</button></form>
+    <p><a href="/admin/invoice-template.xlsx">${esc(t('a_template'))}</a></p></div>`);
 });
 
 app.get('/admin/template.xlsx', (req, res) => {
@@ -461,58 +522,288 @@ app.post('/admin/import', upload.single('file'), (req, res) => {
   res.redirect('/admin/parcels');
 });
 
+// ---------- Загрузка накладных из ежедневной таблицы: одна строка = одна накладная ----------
+
+const INV_IMPORT_COLS = {
+  code: ['код клиента', 'код', 'клиент', 'грузоотправитель', '客户编码', '客户', '发货人', '唛头'],
+  number: ['номер накладной', 'код груза', 'номер', '货号', '单号', '编号'],
+  inv_date: ['дата отправки', 'дата', '发货日期', '日期', '发货时间'],
+  goods: ['перечень товаров', 'товар', 'груз', 'наименование', '品名', '货物', '货名', '名称'],
+  pieces: ['количество', 'мест', 'кол-во', '件数'],
+  total_weight: ['вес', 'вес, кг', '重量', '实重', '毛重'],
+  volume: ['объём', 'объем', 'объём, м³', '体积', '方数'],
+  rate: ['цена', 'тариф', '单价', '价格'],
+  price_basis: ['цена за', '计价'],
+  freight: ['фрахт', '运费'],
+  amount: ['сумма', 'итого', '总计', '合计', '金额', '总价', '总运费', '运费合计'],
+  goods_value: ['стоимость товара', 'общая стоимость', '货值'],
+  ins_rate: ['страховка %', 'страховой %', '保率', '保率 (%)'],
+  ins_fee: ['страховка $', 'страховка', '保险费'],
+  packing: ['упаковка', '打包方式', '包装', '包装方式'],
+  pack_fee: ['плата за упаковку', 'за упаковку', '包装费', '打包费'],
+  advance: ['перевод на заказ', '垫付款'],
+  unload_fee: ['плата за разгрузку', 'за разгрузку', '落地费'],
+  other_fee: ['другие платежи', '其他款项'],
+  origin: ['пункт вылета', 'откуда', '始发地', '发货地', '起运地'],
+  destination: ['пункт назначения', 'куда', '目的地'],
+  transport: ['способ перевозки', '运输方式'],
+  delivery_time: ['время доставки', 'срок', '运输时间'],
+  consignee: ['грузополучатель', '提货联系电话', '收货人'],
+  note: ['замечание', 'примечание', '备注'],
+  cargo_status: ['отслеживание', 'статус', '运踪', '状态'],
+  pay_note: ['оплата', '付款', '收款'],
+};
+// Если заголовки не распознались, читаем колонки по порядку как в ежедневной таблице склада:
+// 品名, 货号, 目的地, 始发地, 重量, 体积, 密度, 单价, 打包费, -, -, -, 包装, 总计, 备注, 运踪, 付款.
+const DAILY_LAYOUT = ['goods', 'number', 'destination', 'origin', 'total_weight', 'volume', null, 'rate', 'pack_fee', null, null, null, 'packing', 'amount', 'note', 'cargo_status', 'pay_note'];
+function matchInvColumn(header) {
+  const parts = String(header || '').toLowerCase().replace(/\s*\$\s*/g, '').split(/[\/\n]/).map((x) => x.trim()).filter(Boolean);
+  for (const [field, names] of Object.entries(INV_IMPORT_COLS)) if (parts.some((p) => names.includes(p))) return field;
+  return null;
+}
+// Дата из Excel: настоящая дата, «16.10.2026», «16.10», «2026-10-16».
+function parseDay(v, fallback) {
+  if (v instanceof Date && !isNaN(v)) return new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const s = String(v ?? '').trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = /^(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?$/.exec(s);
+  if (m) return `${m[3] ? (m[3].length === 2 ? '20' + m[3] : m[3]) : fallback.slice(0, 4)}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return fallback;
+}
+
+app.get('/admin/invoice-template.xlsx', (req, res) => {
+  const head = [['code', 'Код клиента / 客户编码'], ['inv_date', 'Дата отправки / 发货日期'], ['goods', 'Перечень товаров / 品名'], ['pieces', 'Количество / 件数'],
+    ['total_weight', 'Вес / 重量'], ['volume', 'Объём / 体积'], ['rate', 'Цена / 单价'], ['price_basis', 'Цена за / 计价 (м3 / кг)'], ['packing', 'Упаковка / 打包方式'],
+    ['pack_fee', 'Плата за упаковку / 包装费'], ['goods_value', 'Стоимость товара / 货值'], ['ins_rate', 'Страховка % / 保率'], ['advance', 'Перевод на заказ / 垫付款'],
+    ['unload_fee', 'Плата за разгрузку / 落地费'], ['other_fee', 'Другие платежи / 其他款项'], ['destination', 'Пункт назначения / 目的地'], ['transport', 'Способ перевозки / 运输方式'],
+    ['delivery_time', 'Время доставки / 运输时间'], ['note', 'Замечание / 备注']];
+  const ex = { code: 'D1600', inv_date: '16.10.2026', goods: '汽配 Автозапчасти', pieces: 4, total_weight: 75.2, volume: 1.183, rate: 190, price_basis: 'м3', packing: '木架 Обрешётка', pack_fee: 35, goods_value: 0, ins_rate: 0, advance: 0, unload_fee: 0, other_fee: 0, destination: '阿拉木图 Алматы', transport: '陆运 Авто', delivery_time: '15–20 дней', note: '' };
+  const ws = XLSX.utils.aoa_to_sheet([head.map((h) => h[1]), head.map((h) => ex[h[0]])]);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'invoices');
+  res.setHeader('Content-Disposition', 'attachment; filename="cargo151-invoices.xlsx"');
+  res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+});
+
+// Номер склада вида D185-0301-2 или AB016-3D-0302-2: код клиента, ММДД отправки, мест.
+const parseCargoNo = (no) => /^(.+?)-(\d{2})(\d{2})-(\d+)/.exec(String(no || '').trim());
+const DEST_RU = { 阿拉木图: 'Алматы', 比什凯克: 'Бишкек', 莫斯科: 'Москва' };
+
+function importInvoiceRow(req, rec, dayDefault, bad) {
+  const cno = parseCargoNo(rec.number);
+  if (!rec.code && cno) rec.code = cno[1];
+  if (!rec.code) return 0;
+  // В номере после кода может идти пометка (AB016-3D-0302-2): пробуем код целиком, потом короче.
+  const parts = String(rec.code).split('-');
+  let c = null;
+  for (let k = parts.length; k > 0 && !c; k--) c = findClientByCode(parts.slice(0, k).join('-'));
+  if (!c) { bad.push(parts[0].toUpperCase()); return 0; }
+  const client = getClient(c.id);
+  if (!rec.inv_date && cno) {
+    // Год берём из даты по умолчанию; если месяц из номера ещё не наступил, это прошлый год.
+    let y = +dayDefault.slice(0, 4);
+    if (`${y}-${cno[2]}-${cno[3]}` > dayDefault) y--;
+    rec.inv_date = `${y}-${cno[2]}-${cno[3]}`;
+  }
+  rec.inv_date = parseDay(rec.inv_date, dayDefault);
+  if (!numOrNull(rec.pieces) && cno) rec.pieces = cno[4];
+  const n = (k) => numOrNull(String(rec[k] ?? '').replace(',', '.')) || 0;
+  // Цена за кг или за м³: смотрим, что сходится с итогом; без итога — крупная цена значит за м³.
+  if (!rec.price_basis) {
+    const total = n('amount') || n('freight');
+    const byKg = n('rate') * n('total_weight'); const byM3 = n('rate') * n('volume');
+    rec.price_basis = total && byKg && byM3 ? (Math.abs(total - byKg) < Math.abs(total - byM3) ? 'kg' : 'm3') : n('rate') >= 20 ? 'm3' : 'kg';
+  } else rec.price_basis = /кг|kg|公斤/i.test(rec.price_basis) ? 'kg' : 'm3';
+  // Итог из таблицы — главный: фрахт = итог минус остальные платежи.
+  const others = n('ins_fee') + n('pack_fee') + n('advance') + n('unload_fee') + n('other_fee');
+  if (n('amount') && !String(rec.freight ?? '').trim()) rec.freight = Math.round((n('amount') - others) * 100) / 100;
+  else if (n('freight') && !n('amount')) {
+    const calc = n('rate') * (rec.price_basis === 'kg' ? n('total_weight') : n('volume'));
+    if (calc && Math.abs(n('freight') - (calc + others)) < Math.abs(n('freight') - calc)) rec.freight = Math.round((n('freight') - others) * 100) / 100;
+  }
+  delete rec.amount;
+  const w = activeWarehouses()[0];
+  const ORIGIN_RU = Object.fromEntries(db.prepare('SELECT name_zh, name_ru FROM warehouses').all().map((x) => [x.name_zh, x.name_ru]));
+  const zh = (v, map) => { const k = String(v || '').trim(); return map[k] ? `${k} ${map[k]}` : k; };
+  rec.origin = zh(rec.origin, ORIGIN_RU) || req.body.origin || (w ? `${w.name_zh}/${w.name_ru}` : '');
+  rec.destination = zh(rec.destination, DEST_RU) || (client.city_name ? `${CITY_ZH[client.city_name] || ''} ${client.city_name}`.trim() : '');
+  rec.transport ||= req.body.transport || '陆运 Авто';
+  rec.sender = dispCode(client.code);
+  rec.consignee ||= isOwner(req) ? `${client.name} +${client.phone}` : client.name;
+  rec.client_id = client.id;
+  // Без номера в файле собираем D1601-1030-4: повторная загрузка того же файла обновит накладные, а не задвоит.
+  const number = String(rec.number || '').trim().toUpperCase() || (n('pieces') ? invoiceNumber(client, rec.inv_date, n('pieces')) : '');
+  rec.number = number;
+  const existing = number ? db.prepare('SELECT * FROM invoices WHERE number = ? AND client_id = ?').get(number, client.id) : null;
+  if (existing && !n('pieces')) rec.pieces = existing.pieces;
+  const id = saveInvoice(rec, existing);
+  if (id && rec.pay_note !== undefined) db.prepare('UPDATE invoices SET paid = ? WHERE id = ?').run(/付|оплач|paid/i.test(rec.pay_note) ? 1 : existing ? existing.paid : 0, id);
+  return id ? 1 : 0;
+}
+
+app.post('/admin/import-invoices', upload.single('file'), (req, res) => {
+  if (!req.file) return res.redirect('/admin/import');
+  const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
+  const dayDefault = /^\d{4}-\d{2}-\d{2}$/.test(req.body.inv_date) ? req.body.inv_date : new Date().toISOString().slice(0, 10);
+  // Листы по месяцам (1月 … 10月): берём все или только выбранный.
+  const sheets = req.body.sheet && wb.SheetNames.includes(req.body.sheet) ? [req.body.sheet] : wb.SheetNames;
+  let n = 0; let heads = 0; const bad = [];
+  for (const name of sheets) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
+    // Строка заголовков — первая, где есть код клиента или 货号 (сверху может быть шапка).
+    const hi = rows.findIndex((r) => r.map(matchInvColumn).some((f) => f === 'code' || f === 'number'));
+    if (hi < 0) continue;
+    heads++;
+    let map = rows[hi].map(matchInvColumn);
+    if (map.filter((f) => ['total_weight', 'volume', 'rate', 'amount', 'freight'].includes(f)).length < 2 && map[1] === 'number') map = DAILY_LAYOUT;
+    for (const row of rows.slice(hi + 1)) {
+      const rec = {};
+      map.forEach((f, i) => { if (f && rec[f] == null && i < row.length) rec[f] = row[i] instanceof Date ? row[i] : String(row[i] ?? '').trim(); });
+      n += importInvoiceRow(req, rec, dayDefault, bad);
+    }
+  }
+  const unknown = [...new Set(bad)];
+  req.session.flash = `${req.t('a_inv_imported')}: ${n}${unknown.length ? `. ${req.t('a_inv_unknown')} (${unknown.length}): ${unknown.slice(0, 40).join(', ')}${unknown.length > 40 ? '…' : ''}` : ''}${heads ? '' : `. ${req.t('a_inv_nohead')}`}`;
+  res.redirect(unknown.length ? '/admin/clients#add' : '/admin/invoices');
+});
+
 app.get('/admin/invoices', (req, res) => {
   const t = req.t;
   const invoices = db.prepare(`SELECT i.*, c.code, c.name FROM invoices i JOIN clients c ON c.id = i.client_id ORDER BY i.id DESC LIMIT 300`).all();
-  adminRender(req, res, t('a_invoices'), `<div class="card"><form method="get" action="/admin/invoices/new" class="row"><div><label>${esc(t('a_pick_client'))}</label><input name="code" required></div><button>${esc(t('a_new_invoice'))}</button></form></div>
-  <div class="card tbl"><table><tr><th>${esc(t('invoice_no'))}</th><th>${esc(t('client'))}</th><th>${esc(t('date'))}</th><th>${esc(t('total_weight'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th></tr>
-  ${invoices.map((i) => `<tr><td><a href="/admin/invoices/${i.id}">${esc(i.number)}</a></td><td>${esc(i.code)} · ${esc(i.name)}</td><td>${esc(fmtDate(i.created_at))}</td><td>${i.total_weight}</td><td>${esc(money(i.amount))}</td>
-  <td>${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td></tr>`).join('')}</table></div>`);
+  adminRender(req, res, t('a_invoices'), `<div class="card"><form method="get" action="/admin/invoices/new" class="row"><div><label>${esc(t('a_pick_client'))}</label><input name="code" required placeholder="D1600"></div><button>${esc(t('a_new_invoice'))}</button><a class="btn sec" href="/admin/import#inv">${esc(t('a_inv_import'))}</a></form></div>
+  <div class="card">${invoicesTable(t, invoices, '/admin/invoices/')}</div>`);
 });
+
+// Номер накладной: D{код}-{ММДД даты отправки}-{мест}, например D1601-1030-4.
+const invoiceNumber = (client, date, pieces) => `${dispCode(client.code)}-${String(date || '').slice(5, 7)}${String(date || '').slice(8, 10)}-${pieces || 0}`;
+
+function invoiceForm(req, client, inv) {
+  const t = req.t;
+  const w = activeWarehouses()[0];
+  const today = new Date().toISOString().slice(0, 10);
+  const v = inv || {
+    origin: w ? `${w.name_zh}/${w.name_ru}` : '', destination: client.city_name ? `${CITY_ZH[client.city_name] || ''} ${client.city_name}`.trim() : '',
+    transport: '陆运 Авто', sender: dispCode(client.code), consignee: isOwner(req) ? `${client.name} +${client.phone}` : client.name,
+    inv_date: today, rate: 0, price_basis: 'm3', ins_rate: 0, number: '',
+  };
+  const parcels = db.prepare('SELECT * FROM parcels WHERE client_id = ? AND (invoice_id IS NULL OR invoice_id = ?) ORDER BY id').all(client.id, inv ? inv.id : 0);
+  const inp = (k, zh, ru, extra = '') => `<div><label>${esc(zh)} · ${esc(ru)}</label><input name="${k}" id="i-${k}" value="${esc(v[k] ?? '')}" ${NUM_FIELDS.includes(k) ? 'inputmode="decimal"' : ''} ${extra}></div>`;
+  const whs = activeWarehouses();
+  return `<div class="card"><h2>${esc(inv ? `${t('invoice')} ${inv.number}` : t('a_new_invoice'))}: D${esc(client.code)} · ${esc(client.name)}</h2>
+  <form method="post" action="${inv ? `/admin/invoices/${inv.id}` : '/admin/invoices'}" id="invform"><input type="hidden" name="client_id" value="${client.id}">
+  <datalist id="dl-origin">${whs.map((x) => `<option value="${esc(`${x.name_zh}/${x.name_ru}`)}">`).join('')}</datalist>
+  <datalist id="dl-dest">${Object.entries(CITY_ZH).map(([ru, zh]) => `<option value="${esc(`${zh} ${ru}`)}">`).join('')}</datalist>
+  <datalist id="dl-tr"><option value="陆运 Авто"><option value="铁路 ЖД"><option value="空运 Авиа"></datalist>
+  <datalist id="dl-pack"><option value="编织袋 Мешок"><option value="纸箱 Коробка"><option value="木架 Обрешётка"><option value="木架+加固 Обрешётка+усиление"></datalist>
+  <div class="row">${inp('origin', '始发地', 'Пункт вылета', 'list="dl-origin"')}${inp('destination', '目的地', 'Пункт назначения', 'list="dl-dest"')}${inp('transport', '运输方式', 'Способ перевозки', 'list="dl-tr"')}</div>
+  <div class="row"><div><label>发货日期 · Дата отправки</label><input type="date" name="inv_date" id="i-inv_date" value="${esc(String(v.inv_date || today).slice(0, 10))}"></div>
+    ${inp('delivery_time', '运输时间', 'Время доставки', 'placeholder="15–20 дней"')}${inp('sender', '发货人', 'Грузоотправитель')}${inp('consignee', '提货联系电话', 'Грузополучатель')}</div>
+  ${parcels.length ? `<h3>${esc(t('a_pick_parcels'))}</h3><div class="tbl"><table><tr><th></th><th>${esc(t('track'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th></tr>
+    ${parcels.map((p) => `<tr><td><input type="checkbox" name="ids" value="${p.id}" ${!inv || p.invoice_id === inv.id ? 'checked' : ''} style="width:auto" data-w="${p.weight || 0}" data-p="${p.places || 0}"></td><td>${esc(p.track)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td></tr>`).join('')}</table></div>` : ''}
+  <div class="row">${inp('goods', '品名', 'Перечень товаров')}${inp('pieces', '件数', 'Мест')}${inp('total_weight', '重量', 'Вес, кг')}${inp('volume', '体积', 'Объём, м³')}</div>
+  <div class="row">${inp('rate', '单价', 'Цена')}<div><label>за · 按</label><select name="price_basis" id="i-price_basis"><option value="m3" ${v.price_basis !== 'kg' ? 'selected' : ''}>м³</option><option value="kg" ${v.price_basis === 'kg' ? 'selected' : ''}>кг</option></select></div>
+    ${inp('freight', '运费 $', 'Фрахт')}${inp('goods_value', '货值 $', 'Стоимость товара')}${inp('ins_rate', '保率 %', 'Страховка %')}${inp('ins_fee', '保险费 $', 'Страховка $')}</div>
+  <div class="row">${inp('packing', '打包方式', 'Упаковка', 'list="dl-pack"')}${inp('pack_fee', '包装费 $', 'За упаковку')}${inp('advance', '垫付款 $', 'Перевод на заказ')}${inp('unload_fee', '落地费 $', 'За разгрузку')}${inp('other_fee', '其他款项 $', 'Другие платежи')}</div>
+  <div class="row">${inp('cargo_status', '运踪', t('inv_cargo_status'), 'placeholder="3.13到"')}${inp('pay_note', '付款', t('inv_pay_note'))}</div>
+  <div class="row">${inp('note', '备注', 'Замечание')}${inp('number', '货号', `${t('invoice_no')} (${t('inv_auto')})`, `placeholder="D${esc(client.code)}-MMDD-мест" ${inv ? 'data-touched="1"' : ''}`)}
+    <div><label>总计 · ${esc(t('total'))}</label><div class="stat" id="i-total" style="color:var(--brand)">0</div></div></div>
+  <p><button>${esc(inv ? t('save') : t('create'))}</button></p></form></div>
+  <script>(function(){const f=document.getElementById('invform'),g=(k)=>document.getElementById('i-'+k),n=(k)=>parseFloat(String(g(k).value).replace(',','.'))||0,r=(x)=>Math.round(x*100)/100;
+  const code=${JSON.stringify(client.code)};let fr=${inv ? 'true' : 'false'},fi=${inv ? 'true' : 'false'};
+  g('freight').addEventListener('input',()=>fr=true);g('ins_fee').addEventListener('input',()=>fi=true);g('number').addEventListener('input',()=>g('number').dataset.touched='1');
+  const sum=()=>{let w=0,p=0;f.querySelectorAll('input[name=ids]:checked').forEach(x=>{w+=+x.dataset.w;p+=+x.dataset.p});g('total_weight').value=r(w)||'';g('pieces').value=p||'';calc()};
+  f.querySelectorAll('input[name=ids]').forEach(c=>c.addEventListener('change',sum));
+  function calc(){if(!fr)g('freight').value=r(n('rate')*(g('price_basis').value==='kg'?n('total_weight'):n('volume')))||'';
+    if(!fi)g('ins_fee').value=r(n('goods_value')*n('ins_rate')/100)||'';
+    g('total').textContent=r(${JSON.stringify(FEES)}.reduce((s,k)=>s+n(k),0));
+    const d=g('inv_date').value;if(!g('number').dataset.touched&&d)g('number').value='D'+code+'-'+d.slice(5,7)+d.slice(8,10)+'-'+(n('pieces')||0)}
+  f.addEventListener('input',calc);f.addEventListener('change',calc);calc();${inv ? '' : 'sum();'}})();</script>`;
+}
+
+const findClientByCode = (code) => db.prepare('SELECT id FROM clients WHERE code = ?').get(String(code || '').trim().toUpperCase().replace(/^D(?=\d)/, '').replace(/-\d{4}$/, ''));
 
 app.get('/admin/invoices/new', (req, res) => {
-  const t = req.t;
-  const client = db.prepare('SELECT * FROM clients WHERE code = ?').get(String(req.query.code || '').trim().toUpperCase().replace(/^D/, ''));
-  if (!client) { req.session.flash = t('not_found'); return res.redirect('/admin/invoices'); }
-  const parcels = db.prepare('SELECT * FROM parcels WHERE client_id = ? AND invoice_id IS NULL ORDER BY id').all(client.id);
-  adminRender(req, res, t('a_new_invoice'), `<div class="card"><h2>${esc(t('a_new_invoice'))}: ${esc(client.code)} · ${esc(client.name)}</h2>
-    <form method="post" action="/admin/invoices"><input type="hidden" name="client_id" value="${client.id}"><h3>${esc(t('a_pick_parcels'))}</h3>
-    ${parcels.length ? `<div class="tbl"><table><tr><th><input type="checkbox" id="checkall" style="width:auto" checked></th><th>${esc(t('track'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th></tr>
-    ${parcels.map((p) => `<tr><td><input type="checkbox" name="ids" value="${p.id}" checked style="width:auto"></td><td>${esc(p.track)}</td><td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td></tr>`).join('')}</table></div>` : `<p class="muted">${esc(t('no_parcels'))}</p>`}
-    <div class="row" style="margin-top:12px"><div><label>${esc(t('rate'))} (${esc(setting('currency'))})</label><input name="rate" value="${esc(setting('rate_per_kg'))}" inputmode="decimal"></div>
-    <div><label>${esc(t('note'))}</label><input name="note"></div><button>${esc(t('create'))}</button></div></form></div>`);
+  const c = findClientByCode(req.query.code);
+  if (!c) { req.session.flash = req.t('not_found'); return res.redirect('/admin/invoices'); }
+  adminRender(req, res, req.t('a_new_invoice'), invoiceForm(req, getClient(c.id)));
 });
 
-app.post('/admin/invoices', (req, res) => {
-  const clientId = parseInt(req.body.client_id, 10);
-  const ids = [].concat(req.body.ids || []).map((x) => parseInt(x, 10)).filter(Boolean);
-  const rate = numOrNull(req.body.rate) ?? numOrNull(setting('rate_per_kg')) ?? 0;
-  const parcels = ids.map((id) => db.prepare('SELECT * FROM parcels WHERE id = ? AND client_id = ? AND invoice_id IS NULL').get(id, clientId)).filter(Boolean);
-  if (!parcels.length) return res.redirect('/admin/invoices');
-  const weight = Math.round(parcels.reduce((s, p) => s + (p.weight || 0), 0) * 100) / 100;
+function saveInvoice(b, existing) {
+  const client = getClient(parseInt(b.client_id, 10));
+  if (!client) return null;
+  const ids = [].concat(b.ids || []).map((x) => parseInt(x, 10)).filter(Boolean);
+  const parcels = ids.map((id) => db.prepare('SELECT * FROM parcels WHERE id = ? AND client_id = ? AND (invoice_id IS NULL OR invoice_id = ?)').get(id, client.id, existing ? existing.id : 0)).filter(Boolean);
+  const v = {};
+  for (const k of ['origin', 'destination', 'transport', 'delivery_time', 'sender', 'consignee', 'goods', 'packing', 'note', 'cargo_status', 'pay_note']) v[k] = String(b[k] || '').trim().slice(0, 300);
+  for (const k of NUM_FIELDS) v[k] = numOrNull(String(b[k] ?? '').replace(',', '.'));
+  v.inv_date = /^\d{4}-\d{2}-\d{2}$/.test(b.inv_date) ? b.inv_date : new Date().toISOString().slice(0, 10);
+  v.price_basis = b.price_basis === 'kg' ? 'kg' : 'm3';
+  // Пустые поля заполняем из выбранных посылок и по формулам, как в бумажной накладной.
+  if (v.pieces == null) v.pieces = parcels.reduce((s, p) => s + (p.places || 0), 0);
+  if (v.total_weight == null) v.total_weight = Math.round(parcels.reduce((s, p) => s + (p.weight || 0), 0) * 100) / 100;
+  for (const k of NUM_FIELDS) if (v[k] == null && !['freight', 'ins_fee'].includes(k)) v[k] = 0;
+  if (v.freight == null) v.freight = Math.round(v.rate * (v.price_basis === 'kg' ? v.total_weight : v.volume) * 100) / 100;
+  if (v.ins_fee == null) v.ins_fee = Math.round((v.goods_value * v.ins_rate) / 100 * 100) / 100;
+  v.amount = Math.round(FEES.reduce((s, k) => s + v[k], 0) * 100) / 100;
+  let number = String(b.number || '').trim().toUpperCase() || invoiceNumber(client, v.inv_date, v.pieces);
+  for (let i = 2; db.prepare('SELECT id FROM invoices WHERE number = ? AND id != ?').get(number, existing ? existing.id : 0); i++) number = `${number.replace(/\/\d+$/, '')}/${i}`;
+  v.number = number;
+  const cols = Object.keys(v);
   db.exec('BEGIN');
-  const r = db.prepare('INSERT INTO invoices (number, client_id, rate, total_weight, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
-    .run('tmp-' + crypto.randomUUID(), clientId, rate, weight, Math.round(weight * rate * 100) / 100, String(req.body.note || '').slice(0, 300));
-  const id = Number(r.lastInsertRowid);
-  const d = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  db.prepare('UPDATE invoices SET number = ? WHERE id = ?').run(`151-${d}-${id}`, id);
+  let id;
+  if (existing) {
+    id = existing.id;
+    db.prepare(`UPDATE invoices SET ${cols.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...cols.map((k) => v[k]), id);
+    db.prepare('UPDATE parcels SET invoice_id = NULL WHERE invoice_id = ?').run(id);
+  } else {
+    id = Number(db.prepare(`INSERT INTO invoices (client_id, ${cols.join(', ')}) VALUES (?, ${cols.map(() => '?').join(', ')})`).run(client.id, ...cols.map((k) => v[k])).lastInsertRowid);
+  }
   for (const p of parcels) db.prepare('UPDATE parcels SET invoice_id = ? WHERE id = ?').run(id, p.id);
   db.exec('COMMIT');
-  res.redirect(`/admin/invoices/${id}`);
+  return id;
+}
+
+app.post('/admin/invoices', (req, res) => {
+  const id = saveInvoice(req.body, null);
+  res.redirect(id ? `/admin/invoices/${id}` : '/admin/invoices');
 });
 
 app.get('/admin/invoices/:id', (req, res) => {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.id, 10));
   if (!inv) return res.redirect('/admin/invoices');
-  adminRender(req, res, inv.number, `${invoicePage(req, inv)}<form method="post" action="/admin/invoices/${inv.id}/paid" class="noprint">
-    <input type="hidden" name="paid" value="${inv.paid ? 0 : 1}"><button class="sec">${esc(inv.paid ? req.t('unpaid') : req.t('a_mark_paid'))}</button></form>`);
+  const t = req.t;
+  adminRender(req, res, inv.number, `${invoicePage(req, inv)}<div class="row noprint" style="gap:8px">
+    <form method="post" action="/admin/invoices/${inv.id}/paid" style="flex:0 0 auto"><input type="hidden" name="paid" value="${inv.paid ? 0 : 1}"><button class="sec">${esc(inv.paid ? t('unpaid') : t('a_mark_paid'))}</button></form>
+    <a class="btn sec" style="flex:0 0 auto" href="/admin/invoices/${inv.id}/edit">${esc(t('edit'))}</a>
+    <form method="post" action="/admin/invoices/${inv.id}/delete" style="flex:0 0 auto" onsubmit="return confirm('${esc(t('confirm_delete'))}')"><button class="sec">${esc(t('delete'))}</button></form></div>`);
+});
+
+app.get('/admin/invoices/:id/edit', (req, res) => {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.id, 10));
+  if (!inv) return res.redirect('/admin/invoices');
+  adminRender(req, res, inv.number, invoiceForm(req, getClient(inv.client_id), inv));
+});
+
+app.post('/admin/invoices/:id', (req, res) => {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.id, 10));
+  if (!inv) return res.redirect('/admin/invoices');
+  saveInvoice(req.body, inv);
+  res.redirect(`/admin/invoices/${inv.id}`);
+});
+
+app.post('/admin/invoices/:id/delete', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  db.exec('BEGIN');
+  db.prepare('UPDATE parcels SET invoice_id = NULL WHERE invoice_id = ?').run(id);
+  db.prepare('DELETE FROM invoices WHERE id = ?').run(id);
+  db.exec('COMMIT');
+  res.redirect('/admin/invoices');
 });
 
 app.post('/admin/invoices/:id/paid', (req, res) => {
   db.prepare('UPDATE invoices SET paid = ? WHERE id = ?').run(req.body.paid === '1' ? 1 : 0, parseInt(req.params.id, 10));
   res.redirect(`/admin/invoices/${parseInt(req.params.id, 10)}`);
 });
-
 app.get('/admin/settings', (req, res) => {
   const t = req.t;
   const whs = db.prepare('SELECT * FROM warehouses ORDER BY id').all();
@@ -540,6 +831,9 @@ app.get('/admin/settings', (req, res) => {
     <div class="card"><h2>${esc(t('nav_info'))}</h2><p class="muted">${esc(t('s_info_hint'))}</p>
       <label>рус</label><textarea name="info_ru" style="min-height:260px">${esc(setting('info_ru'))}</textarea>
       <label>中文</label><textarea name="info_zh" style="min-height:260px">${esc(setting('info_zh'))}</textarea></div>
+    <div class="card"><h2>${esc(t('s_invoice'))}</h2><div class="row"><div><label>${esc(t('s_inv_company'))}</label><input name="invoice_company" value="${esc(setting('invoice_company'))}"></div>
+      <div><label>${esc(t('s_inv_title'))}</label><input name="invoice_title" value="${esc(setting('invoice_title'))}"></div></div>
+      <label>${esc(t('s_inv_rules'))}</label><textarea name="invoice_rules" style="min-height:320px">${esc(setting('invoice_rules'))}</textarea></div>
     <div class="card"><h2>${esc(t('s_pickup'))}</h2>${cities.map((c) => `<label>${esc(c.name)}</label><input name="city_${c.id}" value="${esc(c.pickup_address)}">`).join('')}</div>
     <div class="card"><div class="row"><div><label>${esc(t('s_rate'))}</label><input name="rate_per_kg" value="${esc(setting('rate_per_kg'))}"></div>
     <div><label>${esc(t('s_currency'))}</label><input name="currency" value="${esc(setting('currency'))}"></div>
@@ -561,7 +855,7 @@ app.post('/admin/settings', (req, res) => {
     db.prepare(`INSERT INTO warehouses (${f.join(', ')}) VALUES (${f.map(() => '?').join(', ')})`).run(...f.map((k) => String(b[`wh_new_${k}`] || '').trim()));
   }
   for (const c of db.prepare('SELECT id FROM cities').all()) db.prepare('UPDATE cities SET pickup_address = ? WHERE id = ?').run(String(b[`city_${c.id}`] ?? '').trim(), c.id);
-  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
+  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'invoice_company', 'invoice_title', 'invoice_rules']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
   db.exec('COMMIT');
   req.session.flash = req.t('saved');
   res.redirect('/admin/settings');
