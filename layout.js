@@ -1,13 +1,13 @@
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const CSS = `
-:root{--bg:#f5f6f8;--card:#fff;--ink:#1c2230;--muted:#6b7280;--line:#e5e7eb;--brand:#d62828;--brand-ink:#fff;--ok:#16a34a;--warn:#d97706;--info:#2563eb}
+:root{--bg:#faf7f7;--card:#fff;--ink:#22191a;--muted:#6f6264;--line:#eee3e4;--brand:#e5262d;--brand-dark:#b8161c;--brand-soft:#fdecec;--brand-ink:#fff;--ok:#16a34a;--warn:#d97706;--info:#2563eb}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
 a{color:var(--info);text-decoration:none}a:hover{text-decoration:underline}
-header{background:var(--ink);color:#fff}header .in{max-width:1100px;margin:0 auto;padding:12px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
-header .logo{font-weight:800;font-size:20px;color:#fff}header .logo b{color:var(--brand)}
-header nav{display:flex;gap:14px;flex-wrap:wrap;flex:1}header nav a{color:#d1d5db}header nav a.on{color:#fff;font-weight:600}
-.lang a{color:#9ca3af;margin-left:8px}.lang a.on{color:#fff;font-weight:700}
+header{background:#fff;color:var(--ink);border-bottom:3px solid var(--brand);position:sticky;top:env(safe-area-inset-top,0px);z-index:5}header .in{max-width:1100px;margin:0 auto;padding:12px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+header .logo{display:block;line-height:0}header .logo img{height:45px;width:auto}header .logo:hover{text-decoration:none}
+header nav{display:flex;gap:14px;flex-wrap:wrap;flex:1}header nav a{color:var(--ink)}header nav a.on{color:var(--brand);font-weight:700}
+.lang a{color:var(--muted);margin-left:8px}.lang a.on{color:var(--brand);font-weight:700}
 main{max-width:1100px;margin:0 auto;padding:24px 16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}
 h1{font-size:26px;margin:0 0 8px}h2{font-size:20px;margin:0 0 12px}h3{font-size:16px;margin:0 0 8px}
@@ -15,6 +15,7 @@ h1{font-size:26px;margin:0 0 8px}h2{font-size:20px;margin:0 0 12px}h3{font-size:
 label{display:block;font-size:14px;font-weight:600;margin:10px 0 4px}
 input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}
 textarea{min-height:90px}
+button:hover,.btn:hover{background:var(--brand-dark);text-decoration:none}button.sec:hover,.btn.sec:hover{background:#e7dfe0}
 button,.btn{display:inline-block;background:var(--brand);color:var(--brand-ink);border:0;border-radius:8px;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer}
 .btn.sec,button.sec{background:#eef0f3;color:var(--ink)}.btn.sm,button.sm{padding:6px 10px;font-size:13px}
 .row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.row>*{flex:1;min-width:140px}.row>button,.row>.btn{flex:0 0 auto}
@@ -25,10 +26,33 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;p
 .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#eef0f3}
 .b-china{background:#e0e7ff;color:#3730a3}.b-transit{background:#fef3c7;color:#92400e}.b-border{background:#fde2e2;color:#991b1b}.b-arrived{background:#dcfce7;color:#166534}.b-delivered{background:#e5e7eb;color:#374151}
 .alert{padding:10px 14px;border-radius:8px;margin-bottom:12px}.alert.err{background:#fee2e2;color:#991b1b}.alert.ok{background:#dcfce7;color:#166534}.alert.info{background:#e0f2fe;color:#075985}
-.stat{font-size:28px;font-weight:800}a.card{color:inherit;text-decoration:none}form>button{margin-top:14px}
+.stat{font-size:28px;font-weight:800}
+.narrow{max-width:640px;margin:0 auto}.center{text-align:center}.code.big{font-size:44px;margin:8px 0}.wide{width:100%;margin-top:16px;text-align:center}
+.hint{font-size:13px;color:var(--muted);background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px;margin-top:6px}
+.steps{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}.steps span{flex:1;min-width:90px;text-align:center;padding:8px;border-radius:8px;background:#fff;border:1px solid var(--line);font-size:13px;color:var(--muted)}
+.steps span.on{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:700}.steps span.done{color:var(--ok);border-color:#bbf7d0}
+.wh-list{display:grid;gap:12px}.wh{display:flex;flex-direction:column;gap:4px;border:2px solid var(--line);border-radius:12px;padding:16px;color:var(--ink)}.wh:hover{border-color:var(--brand);text-decoration:none}.wh b{font-size:20px}
+.field{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}.field>div{min-width:0}.val{font-weight:600;word-break:break-word}
+.alert.warn{background:#fef3c7;color:#92400e}.alert.warn a{color:inherit}
+footer{max-width:1100px;margin:0 auto;padding:8px max(16px,env(safe-area-inset-left,0px)) 32px;font-size:13px}footer a{color:var(--muted)}
+.card ul{padding-left:20px}.card h2{margin-top:18px}.card h2:first-child{margin-top:0}a.card{color:inherit;text-decoration:none}form>button{margin-top:14px}
 .wh-pick{display:grid;grid-template-columns:1fr 1fr;gap:10px}.wh-pick label{border:2px solid var(--line);border-radius:10px;padding:12px;margin:0;cursor:pointer;text-align:center;font-size:16px}
 .wh-pick input{display:none}.wh-pick input:checked+span{color:var(--brand)}.wh-pick label:has(input:checked){border-color:var(--brand);background:#fff5f5}
 .subnav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}.subnav a{padding:8px 12px;border-radius:8px;background:#fff;border:1px solid var(--line);color:var(--ink)}.subnav a.on{background:var(--ink);color:#fff}
+.hero{position:relative;overflow:hidden;border-radius:16px;background:linear-gradient(180deg,#fff 0%,#fff3f3 100%);border:1px solid var(--line);margin-bottom:16px}
+.hero svg{display:block;width:100%;height:auto;max-width:100%}
+.hero .tag{padding:16px 18px 0;font-weight:800;font-size:clamp(18px,3.4vw,28px);line-height:1.25;color:var(--ink);text-wrap:balance;max-width:640px}
+.hero .tag span{color:var(--brand)}
+.route{fill:none;stroke:var(--brand);stroke-width:2.2;stroke-linecap:round;opacity:.9}
+.route.flow{stroke-dasharray:6 10;animation:flow 1.6s linear infinite}
+.glow{fill:none;stroke:var(--brand);stroke-width:8;opacity:.12}
+@keyframes flow{to{stroke-dashoffset:-32}}
+.pulse{fill:var(--brand);opacity:.25;transform-box:fill-box;transform-origin:center;animation:pulse 2.4s ease-out infinite}
+@keyframes pulse{0%{transform:scale(.6);opacity:.45}100%{transform:scale(2.4);opacity:0}}
+.truck{animation:drive 14s linear infinite}
+@keyframes drive{from{transform:translateX(-160px)}to{transform:translateX(960px)}}
+@media (prefers-reduced-motion:reduce){.route.flow,.pulse,.truck{animation:none}.mover{display:none}}
+@media (max-width:720px){header .in{gap:8px 12px}header nav{order:3;flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;gap:16px;padding-bottom:4px;scrollbar-width:none}header nav a{white-space:nowrap}.lang{margin-left:auto}}
 @media print{header,.noprint{display:none!important}.card{border:0}body{background:#fff}}
 `;
 
@@ -41,15 +65,49 @@ document.addEventListener('change',e=>{if(e.target.id==='checkall')document.quer
 `;
 
 function page({ title, body, t, lang, path, session }) {
-  const navItems = [['/', 'nav_home'], ['/track', 'nav_track'], ['/cabinet', 'nav_cabinet'], ['/admin', 'nav_admin']];
-  const nav = navItems.map(([href, k]) => `<a href="${href}" class="${(href === '/' ? path === '/' : path.startsWith(href)) ? 'on' : ''}">${esc(t(k))}</a>`).join('');
+  const navItems = [['/', 'nav_home'], ['/track', 'nav_track'], ['/cabinet', 'nav_cabinet'], ['/services', 'nav_services'], ['/about', 'nav_about'], ['/info', 'nav_info']];
+  const isOn = (href) => (href === '/' ? ['/', '/code', '/address'].includes(path) : path.startsWith(href) || (href === '/cabinet' && path.startsWith('/invoice')));
+  const nav = navItems.map(([href, k]) => `<a href="${href}" class="${isOn(href) ? 'on' : ''}">${esc(t(k))}</a>`).join('');
   const logout = session && (session.clientId || session.admin) ? `<a href="/logout">${esc(t('nav_logout'))}</a>` : '';
   const back = encodeURIComponent(path);
   return `<!doctype html><html lang="${lang === 'zh' ? 'zh-CN' : 'ru'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · ${esc(t('brand'))}</title><style>${CSS}</style></head><body>
-<header><div class="in"><a class="logo" href="/">Cargo <b>151</b></a><nav>${nav}${logout}</nav>
+<header><div class="in"><a class="logo" href="/"><img src="/logo.png" alt="Cargo 151" width="96" height="45"></a><nav>${nav}${logout}</nav>
 <div class="lang"><a href="/lang/ru?back=${back}" class="${lang === 'ru' ? 'on' : ''}">RU</a><a href="/lang/zh?back=${back}" class="${lang === 'zh' ? 'on' : ''}">中文</a></div></div></header>
-<main>${body}</main><script>${JS}</script></body></html>`;
+<main>${body}</main><footer><a href="https://www.instagram.com/cargo.151" target="_blank" rel="noopener">Instagram @cargo.151</a> · <a href="/admin">${esc(t('nav_admin'))}</a></footer><script>${JS}</script></body></html>`;
 }
 
-module.exports = { page, esc };
+// Схематичная карта маршрутов: склады в Китае → города выдачи, с бегущими точками и фурой.
+function heroMap(t, lang) {
+  const P = {
+    gz: [600, 300, lang === 'zh' ? '广州' : 'Гуанчжоу'], yw: [660, 215, lang === 'zh' ? '义乌' : 'Иу'],
+    ala: [350, 165, lang === 'zh' ? '阿拉木图' : 'Алматы'], bsk: [290, 215, lang === 'zh' ? '比什凯克' : 'Бишкек'],
+    msk: [60, 90, lang === 'zh' ? '莫斯科' : 'Москва'], ast: [310, 75, lang === 'zh' ? '阿斯塔纳' : 'Астана'],
+  };
+  const routes = [['gz', 'ala', -40], ['yw', 'ala', -30], ['gz', 'bsk', 30], ['yw', 'msk', -50], ['gz', 'msk', -30], ['yw', 'ast', -40]];
+  const path = ([a, b, bend]) => {
+    const [x1, y1] = P[a]; const [x2, y2] = P[b];
+    return `M${x1},${y1} Q${(x1 + x2) / 2},${(y1 + y2) / 2 + bend} ${x2},${y2}`;
+  };
+  const lines = routes.map((r, i) => `<path id="rt${i}" d="${path(r)}" class="glow"/><path d="${path(r)}" class="route flow" style="animation-delay:-${i * 0.3}s"/>`).join('');
+  const movers = routes.map((r, i) => `<circle r="4" fill="#e5262d" class="mover"><animateMotion dur="${4 + (i % 3)}s" begin="${i * 0.7}s" repeatCount="indefinite" rotate="auto"><mpath href="#rt${i}"/></animateMotion></circle>`).join('');
+  const plane = `<g class="mover"><path d="M-9,0 L9,0 M2,-7 L5,0 L2,7 M-7,-3 L-5,0 L-7,3" stroke="#e5262d" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/><animateMotion dur="7s" repeatCount="indefinite" rotate="auto-reverse"><mpath href="#rt4"/></animateMotion></g>`;
+  const cities = Object.entries(P).map(([k, [x, y, name]]) => {
+    const hub = k === 'gz' || k === 'yw';
+    return `<circle cx="${x}" cy="${y}" r="${hub ? 9 : 6}" class="pulse" style="animation-delay:-${(x % 7) / 3}s"/>
+      <circle cx="${x}" cy="${y}" r="${hub ? 6 : 4.5}" fill="${hub ? '#e5262d' : '#fff'}" stroke="#e5262d" stroke-width="2.5"/>
+      <text x="${x + (hub ? 14 : 11)}" y="${y + 6}" font-size="${hub ? 22 : 18}" font-weight="${hub ? 800 : 600}" fill="#22191a">${esc(name)}</text>`;
+  }).join('');
+  const dots = `<pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" fill="#e8caca"/></pattern>`;
+  const truck = `<g class="truck"><g transform="translate(0,352)">
+    <rect x="0" y="0" width="92" height="34" rx="3" fill="#e5262d"/><text x="46" y="23" font-size="13" font-weight="900" fill="#fff" text-anchor="middle">CARGO 151</text>
+    <path d="M94,8 h18 l12,12 v14 h-30 z" fill="#b8161c"/><rect x="100" y="11" width="10" height="8" fill="#ffe3e3"/>
+    <circle cx="20" cy="38" r="7" fill="#22191a"/><circle cx="70" cy="38" r="7" fill="#22191a"/><circle cx="110" cy="38" r="7" fill="#22191a"/>
+    <circle cx="20" cy="38" r="2.5" fill="#fff"/><circle cx="70" cy="38" r="2.5" fill="#fff"/><circle cx="110" cy="38" r="2.5" fill="#fff"/></g></g>`;
+  return `<div class="hero" aria-hidden="true"><div class="tag">${t('hero_tag')}</div><svg viewBox="0 30 800 370" role="img"><defs>${dots}</defs>
+    <rect width="800" height="400" fill="url(#dots)"/>${lines}${movers}${plane}${cities}
+    <rect x="0" y="392" width="800" height="8" fill="#22191a" opacity=".85"/><path d="M0,396 H800" stroke="#fff" stroke-width="1.5" stroke-dasharray="18 14"/>${truck}</svg>
+    </div>`;
+}
+
+module.exports = { page, esc, heroMap };

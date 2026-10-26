@@ -26,10 +26,12 @@ if [ -d "$APP_DIR/.git" ]; then git -C "$APP_DIR" pull --ff-only; else git clone
 # Пароль админки и секрет сессий создаются один раз и не меняются при обновлении.
 if [ ! -f "$ENV_FILE" ]; then
   ADMIN_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
+  ACCOUNTANT_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
   cat > "$ENV_FILE" <<EOF
 PORT=3000
 DB_PATH=$DATA_DIR/cargo151.db
 ADMIN_PASSWORD=$ADMIN_PASSWORD
+ACCOUNTANT_PASSWORD=$ACCOUNTANT_PASSWORD
 SESSION_SECRET=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48)
 EOF
   chmod 600 "$ENV_FILE"
@@ -78,4 +80,6 @@ fi
 
 echo
 echo "Готово. Сайт: http://${DOMAIN:-$(curl -s ifconfig.me)}"
-echo "Админка: /admin, пароль: $(grep ADMIN_PASSWORD "$ENV_FILE" | cut -d= -f2)"
+echo "Админка: /admin"
+echo "  пароль владельца:   $(grep '^ADMIN_PASSWORD' "$ENV_FILE" | cut -d= -f2)"
+echo "  пароль бухгалтера:  $(grep '^ACCOUNTANT_PASSWORD' "$ENV_FILE" | cut -d= -f2)"
