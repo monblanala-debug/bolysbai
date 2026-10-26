@@ -60,7 +60,7 @@ systemctl restart cargo151
 cat > /etc/nginx/sites-available/cargo151 <<EOF
 server {
   listen 80;
-  server_name ${DOMAIN:-_};
+  server_name ${DOMAIN:+$DOMAIN www.$DOMAIN}${DOMAIN:-_};
   client_max_body_size 10m;
   location / {
     proxy_pass http://127.0.0.1:3000;
@@ -76,7 +76,9 @@ nginx -t && systemctl reload nginx
 
 if [ -n "$DOMAIN" ]; then
   apt-get install -y certbot python3-certbot-nginx
-  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect || echo "HTTPS не настроен: проверьте, что домен указывает на этот сервер, и запустите скрипт ещё раз."
+  # www добавляем, только если он уже указывает на сервер, иначе certbot откажет целиком.
+  WWW=""; getent hosts "www.$DOMAIN" >/dev/null && WWW="-d www.$DOMAIN"
+  certbot --nginx -d "$DOMAIN" $WWW --non-interactive --agree-tos --register-unsafely-without-email --redirect || echo "HTTPS не настроен: проверьте, что домен указывает на этот сервер, и запустите скрипт ещё раз."
 fi
 
 echo
