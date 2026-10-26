@@ -87,9 +87,9 @@ function heroMap(t, lang) {
   const P = {
     gz: [600, 300, lang === 'zh' ? '广州' : 'Гуанчжоу'], yw: [660, 215, lang === 'zh' ? '义乌' : 'Иу'],
     ala: [350, 165, lang === 'zh' ? '阿拉木图' : 'Алматы'], bsk: [290, 215, lang === 'zh' ? '比什凯克' : 'Бишкек'],
-    msk: [60, 90, lang === 'zh' ? '莫斯科' : 'Москва'], ast: [310, 75, lang === 'zh' ? '阿斯塔纳' : 'Астана'],
+    msk: [60, 90, lang === 'zh' ? '莫斯科' : 'Москва'],
   };
-  const routes = [['gz', 'ala', -40], ['yw', 'ala', -30], ['gz', 'bsk', 30], ['yw', 'msk', -50], ['gz', 'msk', -30], ['yw', 'ast', -40]];
+  const routes = [['gz', 'ala', -40], ['yw', 'ala', -30], ['gz', 'bsk', 30], ['yw', 'msk', -50], ['gz', 'msk', -30]];
   const path = ([a, b, bend]) => {
     const [x1, y1] = P[a]; const [x2, y2] = P[b];
     return `M${x1},${y1} Q${(x1 + x2) / 2},${(y1 + y2) / 2 + bend} ${x2},${y2}`;

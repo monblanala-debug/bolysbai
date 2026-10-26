@@ -90,11 +90,7 @@ const STATUSES = {
 function seed() {
   const n = db.prepare('SELECT COUNT(*) c FROM cities').get().c;
   if (n) return;
-  const cities = [
-    ['Алматы', 'ALA'], ['Астана', 'AST'], ['Шымкент', 'SHY'], ['Актау', 'AKU'],
-    ['Актобе', 'AKT'], ['Атырау', 'ATR'], ['Бишкек', 'BSK'], ['Ош', 'OSH'],
-    ['Москва', 'MSK'], ['Санкт-Петербург', 'SPB'],
-  ];
+  const cities = [['Алматы', 'ALA'], ['Москва', 'MSK'], ['Бишкек', 'BSK']];
   const ins = db.prepare('INSERT INTO cities (name, prefix, pickup_address) VALUES (?, ?, ?)');
   for (const [name, prefix] of cities) ins.run(name, prefix, `${name}, адрес пункта выдачи (заполните в админке)`);
   const wh = db.prepare('INSERT INTO warehouses (name_ru, name_zh, receiver, phone, address, note_ru, note_zh) VALUES (?, ?, ?, ?, ?, ?, ?)');

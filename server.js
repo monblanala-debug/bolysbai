@@ -112,6 +112,7 @@ app.get('/', (req, res) => {
       <div class="hint">${esc(t('phone_hint'))}</div>
       <label for="f-city">${esc(t('city'))}</label><select id="f-city" name="city_id" required><option value="">${esc(t('choose_city'))}</option>
         ${cities.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+      <div class="hint">${esc(t('city_hint'))}</div>
       <button class="wide">${esc(t('get_code'))}</button>
     </form></div>
     <div class="card"><h3>${esc(t('have_code'))}</h3>
