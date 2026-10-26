@@ -129,7 +129,8 @@ app.get('/', (req, res) => {
   const t = req.t;
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   res.render(t('nav_home'), `<div class="narrow"><div class="card login-top"><b>${esc(t('have_code'))}</b>
-      <form method="post" action="/find" class="row" style="margin-top:8px"><div><input name="phone" type="tel" required placeholder="+7 777 123 45 67" autocomplete="tel"></div><button class="sec">${esc(t('login_btn'))}</button></form></div>
+      <form method="post" action="/cabinet/login" class="row" style="margin-top:8px"><div><input name="phone" type="tel" required placeholder="${esc(t('phone'))}" autocomplete="tel"></div>
+      <div style="min-width:110px"><input name="code" required placeholder="${esc(t('code'))}: D1600" autocomplete="off" autocapitalize="characters"></div><button class="sec">${esc(t('login_btn'))}</button></form></div>
     ${steps(t, 1)}<div class="card">
     <h1>${esc(t('hero_title'))}</h1><p class="muted">${esc(t('hero_sub'))}</p>
     <form method="post" action="/register">
@@ -151,11 +152,8 @@ app.post('/register', (req, res) => {
   const cityId = parseInt(req.body.city_id, 10);
   if (!name || phone.length < 10 || !db.prepare('SELECT 1 FROM cities WHERE id = ?').get(cityId)) return res.redirect('/');
   const existing = db.prepare('SELECT id FROM clients WHERE phone = ?').get(phone);
-  if (existing) {
-    req.session.clientId = existing.id;
-    req.session.flash = t('phone_exists');
-    return res.redirect('/address');
-  }
+  // Номер уже есть — не пускаем без кода, иначе по чужому номеру можно было бы зайти через регистрацию.
+  if (existing) return res.redirect('/cabinet?exists=1');
   const code = nextClientCode();
   const r = db.prepare('INSERT INTO clients (code, name, phone, city_id) VALUES (?, ?, ?, ?)').run(code, name, phone, cityId);
   linkOrphanParcels(r.lastInsertRowid, code);
@@ -163,12 +161,7 @@ app.post('/register', (req, res) => {
   res.redirect('/address');
 });
 
-app.post('/find', (req, res) => {
-  const c = db.prepare('SELECT id FROM clients WHERE phone = ?').get(normPhone(req.body.phone));
-  if (!c) return res.render(req.t('find_title'), `<div class="narrow card"><div class="alert err">${esc(req.t('not_found'))}</div><a class="btn" href="/">${esc(req.t('get_code'))}</a></div>`);
-  req.session.clientId = c.id;
-  res.redirect('/cabinet');
-});
+app.post('/find', (req, res) => res.redirect('/cabinet'));
 
 // Телефоны складов внизу страницы — для вопросов клиентов.
 function keepers(req, whs) {
@@ -301,9 +294,11 @@ app.get('/cabinet', (req, res) => {
   const client = req.session.clientId && getClient(req.session.clientId);
   if (!client) {
     return res.render(t('login_title'), `<div class="card" style="max-width:420px;margin:0 auto"><h1>${esc(t('login_title'))}</h1><p class="muted">${esc(t('login_hint'))}</p>
-      ${req.query.err ? `<div class="alert err">${esc(t('login_error'))}</div>` : ''}
+      ${req.query.exists ? `<div class="alert info">${esc(t('phone_exists'))}</div>` : ''}${req.query.err ? `<div class="alert err">${esc(t(req.query.err === 'many' ? 'login_many' : 'login_error'))}</div>` : ''}
       <form method="post" action="/cabinet/login"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required placeholder="+7 777 123 45 67" autocomplete="tel">
+      <label>${esc(t('code'))}</label><input name="code" required placeholder="D1600" autocomplete="off" autocapitalize="characters">
       <p><button>${esc(t('login_btn'))}</button></p></form>
+      ${setting('whatsapp') ? `<p class="muted" style="font-size:14px">${esc(t('forgot_code'))} <a href="https://wa.me/${esc(setting('whatsapp'))}?text=${encodeURIComponent(t('forgot_code_msg'))}" target="_blank" rel="noopener">WhatsApp</a></p>` : ''}
       <a href="/">${esc(t('get_code'))}</a></div>`);
   }
   const invoices = db.prepare('SELECT i.*, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i WHERE client_id = ? ORDER BY id DESC').all(client.id);
@@ -315,11 +310,20 @@ app.get('/cabinet', (req, res) => {
 `);
 });
 
+// Не больше 10 неверных попыток за 15 минут с одного адреса — чтобы коды не перебирали.
+const loginFails = new Map();
 app.post('/cabinet/login', (req, res) => {
-  // Принимаем и «1600», и «D1600», и «D1600-4567».
-  // Вход только по номеру WhatsApp: код клиенту помнить не нужно, он увидит его в кабинете.
-  const c = db.prepare('SELECT id FROM clients WHERE phone = ?').get(normPhone(req.body.phone));
-  if (!c) return res.redirect('/cabinet?err=1');
+  const ip = req.ip; const now = Date.now();
+  const f = loginFails.get(ip);
+  if (f && f.until > now && f.n >= 10) return res.redirect('/cabinet?err=many');
+  // Код принимаем в любом виде: 1600, D1600, d1600, D1600-4567, Y7.
+  const code = String(req.body.code || '').trim().toUpperCase().replace(/\s+/g, '').replace(/-\d{4}$/, '').replace(/^D(?=\d)/, '');
+  const c = db.prepare('SELECT id FROM clients WHERE phone = ? AND code = ?').get(normPhone(req.body.phone), code);
+  if (!c) {
+    loginFails.set(ip, { n: (f && f.until > now ? f.n : 0) + 1, until: now + 15 * 60 * 1000 });
+    return res.redirect('/cabinet?err=1');
+  }
+  loginFails.delete(ip);
   req.session.clientId = c.id;
   res.redirect('/cabinet');
 });
