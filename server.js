@@ -109,7 +109,7 @@ for (const [path, key] of [['/about', 'about'], ['/services', 'services']]) {
 app.get('/', (req, res) => {
   const t = req.t;
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
-  res.render(t('nav_home'), `${heroMap(t, req.lang)}<div class="narrow">${notice(req)}${steps(t, 1)}<div class="card">
+  res.render(t('nav_home'), `<div class="narrow">${steps(t, 1)}<div class="card">
     <h1>${esc(t('hero_title'))}</h1><p class="muted">${esc(t('hero_sub'))}</p>
     <form method="post" action="/register">
       <label for="f-name">${esc(t('name'))}</label><input id="f-name" name="name" required maxlength="80" autocomplete="name">
@@ -122,7 +122,7 @@ app.get('/', (req, res) => {
     </form></div>
     <div class="card"><h3>${esc(t('have_code'))}</h3>
       <form method="post" action="/find" class="row"><div><input name="phone" type="tel" required placeholder="${esc(t('phone'))}"></div><button class="sec">${esc(t('find_by_phone'))}</button></form>
-    </div></div>`);
+    </div></div>${heroMap(t, req.lang)}`);
 });
 
 app.post('/register', (req, res) => {
@@ -195,7 +195,7 @@ app.get('/address', (req, res) => {
     ${row('f-n', t('receiver'), f.name)}${row('f-p', t('receiver_phone'), f.phone)}${row('f-a', t('address'), f.address)}
     <p class="muted">${esc(t('rules'))}</p>
     ${keepers(req, whs)}
-    </div>${notice(req)}
+    </div>
     <div class="card"><h3>${esc(t('pickup'))}${client.city_name ? ' · ' + esc(client.city_name) : ''}</h3>
       <div class="addr">${esc(client.pickup_address || '—')}</div>
       <p><a class="btn sec" href="/cabinet">${esc(t('goto_cabinet'))}</a></p></div></div>`);
@@ -254,7 +254,7 @@ app.get('/cabinet', (req, res) => {
   const pRows = parcels.length ? `<div class="tbl"><table><tr><th>${esc(t('track'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('date'))}</th></tr>
     ${parcels.map((p) => `<tr><td><a href="/track?q=${encodeURIComponent(p.track)}">${esc(p.track)}</a></td><td>${statusBadge(t, p.status)}${statusLine(t, p.status, true)}</td><td>${p.weight || ''}</td><td>${p.places || ''}</td><td>${esc(p.description)}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}</table></div>`
     : `<p class="muted">${esc(t('no_parcels'))}</p>`;
-  res.render(t('nav_cabinet'), `${notice(req)}<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
+  res.render(t('nav_cabinet'), `<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
     <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
     <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>
     <div class="card"><h2>${esc(t('my_parcels'))}</h2>${pRows}</div>

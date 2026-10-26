@@ -43,7 +43,7 @@ footer{max-width:1100px;margin:0 auto;padding:8px max(16px,env(safe-area-inset-l
 .hero{position:relative;overflow:hidden;border-radius:16px;background:linear-gradient(180deg,#fff 0%,#fff3f3 100%);border:1px solid var(--line);margin-bottom:16px}
 .hero svg{display:block;width:100%;height:auto;max-width:100%}
 .hero .tag{padding:16px 18px 0;font-weight:800;font-size:clamp(18px,3.4vw,28px);line-height:1.25;color:var(--ink);text-wrap:balance;max-width:640px}
-.hero .tag span{color:var(--brand)}
+.hero .tag span{color:var(--brand)}.hero .tag small{display:block;font-size:.6em;font-weight:600;color:var(--muted);margin-top:4px}.narrow+.hero{margin-top:24px}
 .route{fill:none;stroke:var(--brand);stroke-width:2.2;stroke-linecap:round;opacity:.9}
 .route.flow{stroke-dasharray:6 10;animation:flow 1.6s linear infinite}
 .glow{fill:none;stroke:var(--brand);stroke-width:8;opacity:.12}
