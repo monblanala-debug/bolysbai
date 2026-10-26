@@ -434,7 +434,7 @@ app.get('/admin/clients', (req, res) => {
     <div><label>${esc(t('name'))}</label><input name="name" required></div><div><label>WhatsApp</label><input name="phone" type="tel" required></div>
     <div><label>${esc(t('city'))}</label><select name="city_id">${cities.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><button>${esc(t('add'))}</button></form></details>
   <div class="card tbl"><table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('city'))}</th><th>${esc(t('parcels_count'))}</th><th>${esc(t('registered'))}</th></tr>
-  ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(r.code)}</b></a></td><td>${esc(r.name)}</td>${owner ? `<td><a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a></td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td><td>${esc(fmtDate(r.created_at))}</td></tr>`).join('')}</table></div>`);
+  ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(r.code)}</b></a></td><td>${esc(r.name)}</td>${owner ? `<td>${isStub(r) ? `<a href="/admin/clients?code=${encodeURIComponent(dispCode(r.code))}#add" class="badge b-border">${esc(t('a_no_phone'))}</a>` : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td><td>${esc(fmtDate(r.created_at))}</td></tr>`).join('')}</table></div>`);
 });
 
 app.post('/admin/clients/add', (req, res) => {
@@ -442,6 +442,11 @@ app.post('/admin/clients/add', (req, res) => {
   const phone = normPhone(req.body.phone); const name = String(req.body.name || '').trim().slice(0, 80);
   const cityId = parseInt(req.body.city_id, 10) || null;
   if (!code || !name || phone.length < 10) { req.session.flash = req.t('a_add_client_err'); return res.redirect('/admin/clients#add'); }
+  const stub = db.prepare("SELECT id FROM clients WHERE code = ? AND phone LIKE 'stub-%'").get(code);
+  if (stub && !db.prepare('SELECT 1 FROM clients WHERE phone = ?').get(phone)) {
+    db.prepare('UPDATE clients SET name = ?, phone = ?, city_id = COALESCE(?, city_id) WHERE id = ?').run(name, phone, cityId, stub.id);
+    return res.redirect(`/admin/clients/${stub.id}`);
+  }
   if (db.prepare('SELECT 1 FROM clients WHERE code = ? OR phone = ?').get(code, phone)) { req.session.flash = req.t('a_add_client_dup'); return res.redirect('/admin/clients#add'); }
   const r = db.prepare('INSERT INTO clients (code, name, phone, city_id, legacy) VALUES (?, ?, ?, ?, 1)').run(code, name, phone, cityId);
   linkOrphanParcels(r.lastInsertRowid, code);
@@ -557,6 +562,8 @@ app.post('/admin/receive', photoUpload.array('photos', 10), (req, res) => {
 app.get('/admin/parcels/:id/wa', (req, res) => {
   const p = db.prepare('SELECT * FROM parcels WHERE id = ?').get(parseInt(req.params.id, 10));
   if (!p || !p.client_id || !p.photo_token) return res.redirect('/admin/parcels');
+  const client = getClient(p.client_id);
+  if (isStub(client)) return res.redirect(`/admin/clients?code=${encodeURIComponent(dispCode(client.code))}#add`);
   db.prepare("UPDATE parcels SET wa_sent_at = datetime('now') WHERE id = ?").run(p.id);
   res.redirect(waArrivalUrl(req, p));
 });
@@ -722,17 +729,28 @@ app.get('/admin/invoice-template.xlsx', (req, res) => {
 
 // Номер склада вида D185-0301-2 или AB016-3D-0302-2: код клиента, ММДД отправки, мест.
 const parseCargoNo = (no) => /^(.+?)-(\d{2})(\d{2})-(\d+)/.exec(String(no || '').trim());
-const DEST_RU = { 阿拉木图: 'Алматы', 比什凯克: 'Бишкек', 莫斯科: 'Москва' };
+const DEST_RU = { 阿拉木图: 'Алматы', 比什凯克: 'Бишкек', 莫斯科: 'Москва', '19公里': '19 км (Алматы)', 莫斯科外送: 'Москва, доставка' };
+// Клиент без WhatsApp, созданный из таблицы склада: телефон-заглушка «stub-код», войти в кабинет пока не может.
+const isStub = (client) => String(client.phone || '').startsWith('stub-');
+function stubClient(code, dest) {
+  const cities = db.prepare('SELECT * FROM cities').all();
+  const d = String(dest || '');
+  const city = cities.find((x) => d.includes(x.name) || (CITY_ZH[x.name] && d.includes(CITY_ZH[x.name]))) || (/19公里/.test(d) ? cities.find((x) => x.name === 'Алматы') : null);
+  const r = db.prepare('INSERT INTO clients (code, name, phone, city_id, legacy) VALUES (?, ?, ?, ?, 1)').run(code, dispCode(code), `stub-${code}`, city ? city.id : null);
+  linkOrphanParcels(r.lastInsertRowid, code);
+  return { id: Number(r.lastInsertRowid) };
+}
 
-function importInvoiceRow(req, rec, dayDefault, bad) {
+function importInvoiceRow(req, rec, dayDefault, bad, skipped) {
   const cno = parseCargoNo(rec.number);
   if (!rec.code && cno) rec.code = cno[1];
-  if (!rec.code) return 0;
+  if (!rec.code) { if (rec.number) skipped.push(rec.number); return 0; }
   // В номере после кода может идти пометка (AB016-3D-0302-2): пробуем код целиком, потом короче.
   const parts = String(rec.code).split('-');
   let c = null;
   for (let k = parts.length; k > 0 && !c; k--) c = findClientByCode(parts.slice(0, k).join('-'));
-  if (!c) { bad.push(parts[0].toUpperCase()); return 0; }
+  // Нового клиента из таблицы заводим сразу (без номера), чтобы его накладные не потерялись; номер добавят потом.
+  if (!c) { const code = parts[0].toUpperCase().replace(/^D(?=\d)/, ''); c = stubClient(code, rec.destination); bad.push(dispCode(code)); }
   const client = getClient(c.id);
   if (!rec.inv_date && cno) {
     // Год берём из даты по умолчанию; если месяц из номера ещё не наступил, это прошлый год.
@@ -781,24 +799,31 @@ app.post('/admin/import-invoices', upload.single('file'), (req, res) => {
   const dayDefault = /^\d{4}-\d{2}-\d{2}$/.test(req.body.inv_date) ? req.body.inv_date : new Date().toISOString().slice(0, 10);
   // Листы по месяцам (1月 … 10月): берём все или только выбранный.
   const sheets = req.body.sheet && wb.SheetNames.includes(req.body.sheet) ? [req.body.sheet] : wb.SheetNames;
-  let n = 0; let heads = 0; const bad = [];
+  let n = 0; let heads = 0; const bad = []; const skipped = [];
   for (const name of sheets) {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
     // Строка заголовков — первая, где есть код клиента или 货号 (сверху может быть шапка).
-    const hi = rows.findIndex((r) => r.map(matchInvColumn).some((f) => f === 'code' || f === 'number'));
-    if (hi < 0) continue;
+    let hi = rows.findIndex((r) => r.map(matchInvColumn).some((f) => f === 'code' || f === 'number'));
+    let map;
+    if (hi >= 0) {
+      map = rows[hi].map(matchInvColumn);
+      if (map.filter((f) => ['total_weight', 'volume', 'rate', 'amount', 'freight'].includes(f)).length < 2 && map[1] === 'number') map = DAILY_LAYOUT;
+    } else if (rows.some((r) => parseCargoNo(r[1]))) {
+      // Таблица без заголовков, как ежедневная выгрузка склада: колонки по порядку.
+      map = DAILY_LAYOUT; hi = -1;
+    } else continue;
     heads++;
-    let map = rows[hi].map(matchInvColumn);
-    if (map.filter((f) => ['total_weight', 'volume', 'rate', 'amount', 'freight'].includes(f)).length < 2 && map[1] === 'number') map = DAILY_LAYOUT;
     for (const row of rows.slice(hi + 1)) {
       const rec = {};
-      map.forEach((f, i) => { if (f && rec[f] == null && i < row.length) rec[f] = row[i] instanceof Date ? row[i] : String(row[i] ?? '').trim(); });
-      n += importInvoiceRow(req, rec, dayDefault, bad);
+      // Excel превращает «25.4» и «1.4» в даты (25 апреля, 1 апреля): в числовых колонках возвращаем число день.месяц.
+      const cell = (f, v) => (v instanceof Date && f !== 'inv_date' ? Number(`${new Date(v.getTime() + 432e5).getUTCDate()}.${new Date(v.getTime() + 432e5).getUTCMonth() + 1}`) : v instanceof Date ? v : String(v ?? '').trim());
+      map.forEach((f, i) => { if (f && rec[f] == null && i < row.length) rec[f] = cell(f, row[i]); });
+      n += importInvoiceRow(req, rec, dayDefault, bad, skipped);
     }
   }
   const unknown = [...new Set(bad)];
-  req.session.flash = `${req.t('a_inv_imported')}: ${n}${unknown.length ? `. ${req.t('a_inv_unknown')} (${unknown.length}): ${unknown.slice(0, 40).join(', ')}${unknown.length > 40 ? '…' : ''}` : ''}${heads ? '' : `. ${req.t('a_inv_nohead')}`}`;
-  res.redirect(unknown.length ? '/admin/clients#add' : '/admin/invoices');
+  req.session.flash = `${req.t('a_inv_imported')}: ${n}${unknown.length ? `. ${req.t('a_inv_new_clients')} (${unknown.length}): ${unknown.slice(0, 40).join(', ')}${unknown.length > 40 ? '…' : ''}` : ''}${skipped.length ? `. ${req.t('a_inv_skipped')}: ${skipped.slice(0, 20).join(', ')}` : ''}${heads ? '' : `. ${req.t('a_inv_nohead')}`}`;
+  res.redirect('/admin/invoices');
 });
 
 app.get('/admin/invoices', (req, res) => {
