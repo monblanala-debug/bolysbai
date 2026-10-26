@@ -62,7 +62,7 @@ function addressFields(w, client) {
 }
 
 function steps(t, n) {
-  return `<div class="steps">${[t('step1'), t('step2'), t('step3')].map((s, i) => `<span class="${i + 1 === n ? 'on' : i + 1 < n ? 'done' : ''}">${i + 1}. ${esc(s)}</span>`).join('')}</div>`;
+  return `<div class="steps">${[t('step1'), t('step3')].map((s, i) => `<span class="${i + 1 === n ? 'on' : i + 1 < n ? 'done' : ''}">${i + 1}. ${esc(s)}</span>`).join('')}</div>`;
 }
 
 const copyBtn = (t, id, label, primary) => `<button type="button" class="${primary ? '' : 'sec sm'}" data-copy="${id}" data-done="${esc(t('copied'))}">${esc(label || t('copy'))}</button>`;
@@ -129,36 +129,35 @@ app.post('/register', (req, res) => {
   if (existing) {
     req.session.clientId = existing.id;
     req.session.flash = t('phone_exists');
-    return res.redirect('/code');
+    return res.redirect('/address');
   }
   const code = nextClientCode();
   const r = db.prepare('INSERT INTO clients (code, name, phone, city_id) VALUES (?, ?, ?, ?)').run(code, name, phone, cityId);
   linkOrphanParcels(r.lastInsertRowid, code);
   req.session.clientId = Number(r.lastInsertRowid);
-  res.redirect('/code');
+  res.redirect('/address');
 });
 
 app.post('/find', (req, res) => {
   const c = db.prepare('SELECT id FROM clients WHERE phone = ?').get(normPhone(req.body.phone));
   if (!c) return res.render(req.t('find_title'), `<div class="narrow card"><div class="alert err">${esc(req.t('not_found'))}</div><a class="btn" href="/">${esc(req.t('get_code'))}</a></div>`);
   req.session.clientId = c.id;
-  res.redirect('/code');
+  res.redirect('/address');
 });
 
-app.get('/code', (req, res) => {
+// Старая ссылка на отдельную страницу кода — теперь код показан на странице склада.
+app.get('/code', (req, res) => res.redirect('/address'));
+
+// Код клиента вверху страницы склада, с кнопкой копирования.
+function codeBanner(req, client) {
   const t = req.t;
-  const client = currentClient(req);
-  if (!client) return res.redirect('/');
   const flash = req.session.flash; delete req.session.flash;
   const w = activeWarehouses()[0];
   const mark = w ? shippingMark(w.mark_template, client) : client.code;
-  res.render(t('your_code'), `<div class="narrow">${steps(t, 2)}${flash ? `<div class="alert ok">${esc(flash)}</div>` : ''}
-    <div class="card center"><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
-    <div class="code big" id="c-mark">${esc(mark)}</div>
-    <p>${copyBtn(t, 'c-mark', t('copy_code'))}</p>
-    <p class="muted">${esc(t('code_explain'))}</p>
-    <a class="btn wide" href="/address">${esc(t('next_address'))}</a></div></div>`);
-});
+  return `${flash ? `<div class="alert ok">${esc(flash)}</div>` : ''}<div class="card codebar">
+    <div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div><div class="code" id="c-mark">${esc(mark)}</div></div>
+    ${copyBtn(t, 'c-mark', t('copy_code'))}</div>`;
+}
 
 app.get('/address', (req, res) => {
   const t = req.t;
@@ -169,14 +168,14 @@ app.get('/address', (req, res) => {
   const note = (x) => (req.lang === 'zh' ? x.note_zh : x.note_ru);
   const hours = (x) => (req.lang === 'zh' ? x.hours_zh : x.hours_ru);
   if (!w) {
-    return res.render(t('choose_wh'), `<div class="narrow">${steps(t, 3)}<div class="card"><h1>${esc(t('choose_wh'))}</h1>
+    return res.render(t('choose_wh'), `<div class="narrow">${steps(t, 2)}${codeBanner(req, client)}<div class="card"><h1>${esc(t('choose_wh'))}</h1>
       <div class="wh-list">${whs.map((x) => `<a class="wh" href="/address?wh=${x.id}"><b>${esc(whName(req.lang, x))}</b><span>${esc(note(x))}</span><span class="muted">🕘 ${esc(hours(x))}</span></a>`).join('')}</div>
       ${notice(req)}
       </div></div>`);
   }
   const f = addressFields(w, client);
   const row = (id, label, value) => `<div class="field"><div><div class="muted">${esc(label)}</div><div class="val" id="${id}">${esc(value)}</div></div>${copyBtn(t, id)}</div>`;
-  res.render(t('china_address'), `<div class="narrow">${steps(t, 3)}<div class="card">
+  res.render(t('china_address'), `<div class="narrow">${steps(t, 2)}${codeBanner(req, client)}<div class="card">
     <div class="row" style="align-items:center"><h1 style="margin:0">${esc(t('warehouse'))}: ${esc(whName(req.lang, w))}</h1>
       <a href="/address" class="btn sec sm" style="flex:0 0 auto">${esc(t('change_wh'))}</a></div>
     <p class="muted">🕘 ${esc(t('hours'))}: ${esc(hours(w))}</p>
