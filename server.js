@@ -243,26 +243,22 @@ app.get('/track', (req, res) => {
     </div>${results}`);
 });
 
-// ---------- Фото посылки по ссылке из WhatsApp (без входа) ----------
+// ---------- Фото груза на весах к накладной ----------
 
-const parcelPhotos = (id) => db.prepare('SELECT * FROM parcel_photos WHERE parcel_id = ? ORDER BY id').all(id);
+const invoicePhotos = (id) => db.prepare('SELECT * FROM invoice_photos WHERE invoice_id = ? ORDER BY id').all(id);
+// Выбор фото на телефоне: сжимаем до 1600 px и сразу отправляем форму — бухгалтеру хватает одного нажатия.
+const PHOTO_JS = `<script>document.querySelectorAll('input[data-photo]').forEach((inp)=>inp.addEventListener('change',async()=>{const out=new DataTransfer();
+for(const f of inp.files){try{const b=await createImageBitmap(f);const k=Math.min(1,1600/Math.max(b.width,b.height));const c=document.createElement('canvas');c.width=b.width*k;c.height=b.height*k;c.getContext('2d').drawImage(b,0,0,c.width,c.height);
+const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.82));out.items.add(new File([blob],'p.jpg',{type:'image/jpeg'}))}catch(e){out.items.add(f)}}
+try{inp.files=out.files}catch(e){}inp.closest('form').submit()}))</script>`;
+const photoForm = (t, id, back) => `<form method="post" action="/admin/invoices/${id}/photos" enctype="multipart/form-data" class="noprint" style="display:inline-block;margin:0">
+  <input type="hidden" name="back" value="${esc(back)}"><label class="btn sec sm" style="margin:0;cursor:pointer">📷 ${esc(t('a_add_photo'))}<input type="file" name="photos" accept="image/*" multiple data-photo hidden></label></form>`;
 const photoGrid = (photos) => `<div class="photos">${photos.map((f) => `<a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a>`).join('')}</div>`;
 
 app.get('/photo/:file', (req, res) => {
   const f = String(req.params.file);
-  if (!/^[a-f0-9-]{36}\.jpg$/.test(f) || !db.prepare('SELECT 1 FROM parcel_photos WHERE file = ?').get(f)) return res.sendStatus(404);
+  if (!/^[a-f0-9-]{36}\.jpg$/.test(f) || !db.prepare('SELECT 1 FROM invoice_photos WHERE file = ?').get(f)) return res.sendStatus(404);
   res.sendFile(require('path').join(PHOTO_DIR, f), { maxAge: '30d' });
-});
-
-app.get('/p/:token', (req, res) => {
-  const t = req.t;
-  const p = db.prepare('SELECT * FROM parcels WHERE photo_token = ?').get(String(req.params.token));
-  if (!p) return res.status(404).render('404', `<div class="card"><p>${esc(t('track_none'))}</p></div>`);
-  const w = p.warehouse_id ? db.prepare('SELECT * FROM warehouses WHERE id = ?').get(p.warehouse_id) : null;
-  res.render(`${t('a_receive_title')} ${p.client_code || ''}`, `<div class="card"><div class="row" style="align-items:center"><h1 style="margin:0">${esc(p.client_code ? dispCode(p.client_code) : '')}</h1><div style="flex:0 0 auto">${statusBadge(t, p.status)}</div></div>
-    <p class="muted">${w ? `${esc(t('warehouse'))}: ${esc(whName(req.lang, w))} · ` : ''}${esc(fmtDate(p.created_at))} · ${esc(t('places'))}: ${p.places || '—'}${p.weight ? ` · ${esc(t('weight'))}: ${p.weight}` : ''}${p.description ? ` · ${esc(p.description)}` : ''}</p>
-    ${photoGrid(parcelPhotos(p.id))}
-    <p><a class="btn sec" href="/cabinet">${esc(t('nav_cabinet'))}</a></p></div>`);
 });
 
 // ---------- Личный кабинет ----------
@@ -272,7 +268,7 @@ function invoicesTable(t, invoices, base) {
   // Клиенту — карточками, чтобы на телефоне всё помещалось без прокрутки вбок.
   if (base === '/invoice/') return `<div class="invlist">${invoices.map((i) => `<div class="inv">
     <div class="row" style="align-items:center"><b style="font-size:17px">${esc(i.number)}</b><span class="muted" style="flex:0 0 auto">${esc(fmtDay(i.inv_date || i.created_at))}</span></div>
-    <div class="muted" style="margin:4px 0">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}</div>
+    <div class="muted" style="margin:4px 0">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}${i.pc ? ` · 📷 ${i.pc}` : ''}</div>
     <div class="row" style="align-items:center"><div style="flex:0 0 auto">${statusBadge(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit')}
       ${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</div>
       <b style="font-size:20px;color:var(--brand);text-align:right">${esc(money(i.amount))}</b></div>
@@ -281,7 +277,7 @@ function invoicesTable(t, invoices, base) {
   ${invoices.map((i) => `<tr><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b>${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}</td>
   <td>${esc(cargoSummary(t, i))}</td><td><b>${esc(money(i.amount))}</b></td>
   <td><div style="margin-bottom:4px">${statusBadge(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit')}</div>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
-  <td><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a></td></tr>`).join('')}</table></div>`;
+  <td style="white-space:nowrap"><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a> ${photoForm(t, i.id, '/admin/invoices')}${i.pc ? ` <span class="muted">📷 ${i.pc}</span>` : ''}</td></tr>`).join('')}</table></div>${PHOTO_JS}`;
 }
 
 app.get('/cabinet', (req, res) => {
@@ -294,18 +290,13 @@ app.get('/cabinet', (req, res) => {
       <p><button>${esc(t('login_btn'))}</button></p></form>
       <a href="/">${esc(t('get_code'))}</a></div>`);
   }
-  const invoices = db.prepare('SELECT * FROM invoices WHERE client_id = ? ORDER BY id DESC').all(client.id);
-  const received = db.prepare(`SELECT p.*, ${req.lang === 'zh' ? 'w.name_zh' : 'w.name_ru'} wh FROM parcels p LEFT JOIN warehouses w ON w.id = p.warehouse_id
-    WHERE p.client_id = ? AND p.photo_token IS NOT NULL ORDER BY p.id DESC LIMIT 30`).all(client.id);
+  const invoices = db.prepare('SELECT i.*, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i WHERE client_id = ? ORDER BY id DESC').all(client.id);
   const w = activeWarehouses()[0];
   res.render(t('nav_cabinet'), `<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
     <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
     <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>
     <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoicesTable(t, invoices, '/invoice/')}</div>
-    ${received.length ? `<div class="card"><h2>${esc(t('my_parcels'))}</h2><p class="muted" style="margin-top:-6px">${esc(t('received_hint'))}</p><div class="invlist">${received.map((p) => { const ph = parcelPhotos(p.id)[0]; return `<a class="inv prow" href="/p/${esc(p.photo_token)}" style="color:inherit;text-decoration:none">
-      ${ph ? `<img src="/photo/${esc(ph.file)}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex:0 0 64px">` : ''}
-      <div style="min-width:0"><b>${esc(fmtDT(p.created_at))}</b><div class="muted" style="font-size:14px">${p.wh ? `${esc(p.wh)} · ` : ''}${esc(t('places'))}: ${p.places}${p.weight ? ` · ${p.weight} ${esc(t('kg'))}` : ''}${p.description ? ` · ${esc(p.description)}` : ''}</div></div>
-      <span style="flex:0 0 auto;margin-left:auto">📷</span></a>`; }).join('')}</div></div>` : ''}`);
+`);
 });
 
 app.post('/cabinet/login', (req, res) => {
@@ -351,6 +342,7 @@ function invoicePage(req, inv) {
   const cell = ([k, zh, ru]) => `<div class="c"><div class="l">${esc(zh)}<br>${esc(ru)}</div><div class="v">${esc(invoiceValue(inv, k))}</div></div>`;
   const rules = String(setting('invoice_rules') || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const parcels = db.prepare('SELECT track FROM parcels WHERE invoice_id = ? ORDER BY id').all(inv.id);
+  const photos = invoicePhotos(inv.id);
   return `<div class="row noprint" style="align-items:center;margin-bottom:12px"><a href="${req.session.admin ? '/admin/invoices' : '/cabinet'}">← ${esc(t('back'))}</a>
     <span style="margin-left:auto">${inv.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</span>
     <button type="button" class="sec" onclick="print()" style="flex:0 0 auto">${esc(t('print'))}</button></div>
@@ -364,6 +356,9 @@ function invoicePage(req, inv) {
     ${inv.cargo_status ? `<div class="wb-tracks"><b>运踪 · ${esc(t('inv_cargo_status'))}:</b> ${esc(cargoStatus(t, inv.cargo_status))}</div>` : ''}
     ${parcels.length ? `<div class="wb-tracks"><b>${esc(t('track'))}:</b> ${parcels.map((p) => esc(p.track)).join(', ')}</div>` : ''}
   </div></div>
+  ${photos.length || req.session.admin ? `<div class="card"><h2 style="margin-top:0">${esc(t('inv_photos'))}</h2>
+    ${photos.length ? `<div class="photos">${photos.map((f) => `<div style="position:relative"><a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a>${req.session.admin ? `<form method="post" action="/admin/invoices/${inv.id}/photos/${f.id}/delete" class="noprint" style="position:absolute;top:4px;right:4px;margin:0" onsubmit="return confirm('${esc(t('confirm_delete_photo'))}')"><button class="sec sm" style="padding:2px 8px">✕</button></form>` : ''}</div>`).join('')}</div>` : `<p class="muted">${esc(t('inv_no_photos'))}</p>`}
+    ${req.session.admin ? photoForm(t, inv.id, `/admin/invoices/${inv.id}`) + PHOTO_JS : ''}</div>` : ''}
   <div class="wb wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
       ${rules.map((l, i) => (i === 0 && !/^\d/.test(l) ? `<p><b>${esc(l)}</b></p>` : `<p>${esc(l)}</p>`)).join('')}</div>
   <p class="muted" style="font-size:13px">${esc(t('inv_rules_agree'))}</p>
@@ -383,7 +378,7 @@ app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
 
 // ---------- Админка ----------
 
-const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/receive', 'a_receive'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/settings', 'a_settings']];
+const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/settings', 'a_settings']];
 function adminRender(req, res, title, body) {
   const role = `<span class="badge" style="margin-left:auto">${esc(req.t(isOwner(req) ? 'role_owner' : 'role_accountant'))}</span>`;
   const tabs = ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings').map(([h, k]) => `<a href="${h}" class="${req.path === h || (h !== '/admin' && req.path.startsWith(h)) ? 'on' : ''}">${esc(req.t(k))}</a>`).join('');
@@ -526,102 +521,14 @@ app.get('/admin/clients/:id', (req, res) => {
 function parcelsTable(req, parcels) {
   const t = req.t;
   if (!parcels.length) return `<p class="muted">${esc(t('no_parcels'))}</p>`;
-  return `<form method="post" action="/admin/parcels/bulk"><div class="tbl"><table><tr><th><input type="checkbox" id="checkall" style="width:auto"></th><th>${esc(t('track'))}</th><th>${esc(t('client'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('invoice'))}</th><th>${esc(t('photo'))}</th><th>${esc(t('date'))}</th></tr>
+  return `<form method="post" action="/admin/parcels/bulk"><div class="tbl"><table><tr><th><input type="checkbox" id="checkall" style="width:auto"></th><th>${esc(t('track'))}</th><th>${esc(t('client'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('invoice'))}</th><th>${esc(t('date'))}</th></tr>
   ${parcels.map((p) => `<tr><td><input type="checkbox" name="ids" value="${p.id}" style="width:auto"></td><td>${esc(p.track)}</td>
   <td>${p.client_id ? `<a href="/admin/clients/${p.client_id}">${esc(p.client_code)}</a>` : `<span class="badge b-border">${esc(p.client_code || t('a_no_client'))}</span>`}</td>
-  <td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td><td>${p.invoice_id ? `<a href="/admin/invoices/${p.invoice_id}">#${p.invoice_id}</a>` : ''}</td>
-  <td style="white-space:nowrap">${p.photo_token ? `<a href="/p/${esc(p.photo_token)}" target="_blank">📷</a>` : ''}${p.client_id && p.photo_token ? ` <a href="/admin/parcels/${p.id}/wa" target="_blank" title="WhatsApp">${p.wa_sent_at ? '✓' : '➤'} WA</a>` : ''}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}
+  <td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td><td>${p.invoice_id ? `<a href="/admin/invoices/${p.invoice_id}">#${p.invoice_id}</a>` : ''}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}
   </table></div><div class="row" style="margin-top:12px"><div><label>${esc(t('a_bulk_status'))}</label><select name="status">${statusOptions(t)}</select></div>
   <div><label>${esc(t('note'))}</label><input name="comment"></div><button>${esc(t('apply'))}</button></div>
   <input type="hidden" name="back" value="${esc(req.originalUrl)}"></form>`;
 }
-
-// ---------- Приёмка на складе: код клиента + фото с камеры → посылка у клиента + сообщение в WhatsApp ----------
-
-function waArrivalUrl(req, p) {
-  const client = getClient(p.client_id);
-  const w = p.warehouse_id ? db.prepare('SELECT * FROM warehouses WHERE id = ?').get(p.warehouse_id) : null;
-  const tpl = setting('wa_arrival_' + (req.body?.wa_lang === 'zh' ? 'zh' : 'ru')) || setting('wa_arrival_ru');
-  const text = tpl.replace('{name}', client.name).replace('{mark}', dispCode(client.code)).replace('{warehouse}', w ? w.name_ru : '')
-    .replace('{places}', p.places || 1).replace('{weight}', p.weight ? `, вес: ${p.weight} кг` : '')
-    .replace('{link}', `${req.protocol}://${req.get('host')}/p/${p.photo_token}`);
-  return `https://wa.me/${client.phone}?text=${encodeURIComponent(text)}`;
-}
-
-app.get('/admin/api/client', (req, res) => {
-  const c = findClientByCode(req.query.code);
-  const client = c && getClient(c.id);
-  res.json(client ? { name: client.name, city: client.city_name || '', code: dispCode(client.code) } : null);
-});
-
-app.get('/admin/receive', (req, res) => {
-  const t = req.t;
-  const whs = activeWarehouses();
-  const lastWh = parseInt(req.session.lastWh, 10) || (whs[0] && whs[0].id);
-  const done = req.query.done ? db.prepare('SELECT * FROM parcels WHERE id = ?').get(parseInt(req.query.done, 10)) : null;
-  const doneClient = done && done.client_id ? getClient(done.client_id) : null;
-  const recent = db.prepare(`SELECT * FROM parcels WHERE photo_token IS NOT NULL AND date(created_at) = date('now') ORDER BY id DESC LIMIT 30`).all();
-  adminRender(req, res, t('a_receive'), `${done ? `<div class="card" style="border:2px solid #22c55e"><h2 style="margin-top:0">✓ ${esc(t('a_receive_saved'))}: ${esc(dispCode(done.client_code || ''))}${doneClient ? ` · ${esc(doneClient.name)}` : ''}</h2>
-      ${photoGrid(parcelPhotos(done.id))}
-      ${doneClient ? `<p><a class="btn wa-btn" href="/admin/parcels/${done.id}/wa" target="_blank" onclick="setTimeout(()=>location.href='/admin/receive',1500)">${esc(t('a_send_wa'))}</a></p>` : `<p class="alert err">${esc(t('a_no_client'))}</p>`}</div>` : ''}
-  <div class="card"><h2 style="margin-top:0">${esc(t('a_receive_title'))}</h2><p class="muted">${esc(t('a_receive_hint'))}</p>
-  <form method="post" action="/admin/receive" enctype="multipart/form-data" id="rcv">
-    <div class="seg" style="margin-bottom:10px">${whs.map((w) => `<label><input type="radio" name="warehouse_id" value="${w.id}" ${w.id === lastWh ? 'checked' : ''}><span>${esc(whName(req.lang, w))}</span></label>`).join('')}</div>
-    <label>${esc(t('code'))}</label><input name="code" id="r-code" required autocomplete="off" placeholder="D1601-4567" style="font-size:22px;font-weight:700">
-    <div id="r-who" class="muted" style="min-height:22px;margin:4px 0"></div>
-    <label class="btn photo-btn" for="r-photo">📷 ${esc(t('a_take_photo'))}</label>
-    <input type="file" name="photos" id="r-photo" accept="image/*" capture="environment" multiple hidden>
-    <div id="r-prev" class="photos"></div>
-    <div class="row"><div><label>${esc(t('places'))}</label><input name="places" inputmode="numeric" value="1"></div><div><label>${esc(t('weight'))}</label><input name="weight" inputmode="decimal"></div></div>
-    <div class="row"><div><label>${esc(t('track'))} (${esc(t('optional'))})</label><input name="track"></div><div><label>${esc(t('description'))}</label><input name="description"></div></div>
-    <p><button style="width:100%;font-size:18px;padding:14px">${esc(t('a_receive_btn'))}</button></p></form></div>
-  ${recent.length ? `<div class="card"><h2>${esc(t('a_receive_today'))} (${recent.length})</h2>${parcelsTable(req, recent)}</div>` : ''}
-  <script>(function(){const code=document.getElementById('r-code'),who=document.getElementById('r-who'),inp=document.getElementById('r-photo'),prev=document.getElementById('r-prev');let tm;
-  code.addEventListener('input',()=>{clearTimeout(tm);tm=setTimeout(async()=>{const v=code.value.trim();if(!v){who.textContent='';return}
-    try{const r=await (await fetch('/admin/api/client?code='+encodeURIComponent(v))).json();who.innerHTML=r?'✓ <b>'+r.code+'</b> · '+r.name.replace(/</g,'&lt;')+(r.city?' · '+r.city:''):'<span style="color:#b8161c">${esc(t('a_receive_unknown'))}</span>'}catch(e){}},300)});
-  // Сжимаем фото на телефоне до 1600 px, чтобы загрузка шла быстро даже по мобильной сети.
-  inp.addEventListener('change',async()=>{const out=new DataTransfer();prev.innerHTML='';for(const f of inp.files){try{const b=await createImageBitmap(f);const k=Math.min(1,1600/Math.max(b.width,b.height));const c=document.createElement('canvas');c.width=b.width*k;c.height=b.height*k;c.getContext('2d').drawImage(b,0,0,c.width,c.height);
-    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.82));out.items.add(new File([blob],'p.jpg',{type:'image/jpeg'}))}catch(e){out.items.add(f)}
-    const im=document.createElement('img');im.src=URL.createObjectURL(f);prev.appendChild(im)}try{inp.files=out.files}catch(e){}});
-  ${done ? '' : 'code.focus()'}})();</script>`);
-});
-
-app.post('/admin/receive', photoUpload.array('photos', 10), (req, res) => {
-  const b = req.body;
-  const c = findClientByCode(b.code);
-  const client = c && getClient(c.id);
-  const raw = String(b.code || '').trim().toUpperCase();
-  const mark = client ? dispCode(client.code) : raw;
-  const whId = parseInt(b.warehouse_id, 10) || null;
-  req.session.lastWh = whId;
-  const now = new Date();
-  // Без трек-номера посылка получает номер из кода и времени приёмки: D1601-1026-1432.
-  let track = String(b.track || '').trim();
-  if (!track) track = `${mark}-${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-  const w = whId ? db.prepare('SELECT * FROM warehouses WHERE id = ?').get(whId) : null;
-  db.exec('BEGIN');
-  const id = Number(upsertParcel({ track, clientCode: client ? client.code : raw, weight: b.weight, places: b.places, description: b.description, status: 'china' }));
-  const p = db.prepare('SELECT * FROM parcels WHERE id = ?').get(id);
-  db.prepare('UPDATE parcels SET warehouse_id = ?, photo_token = COALESCE(photo_token, ?), client_id = COALESCE(?, client_id) WHERE id = ?')
-    .run(whId, crypto.randomBytes(8).toString('base64url'), client ? client.id : null, id);
-  if (w && p.status === 'china') db.prepare("UPDATE parcel_events SET comment = ? WHERE id = (SELECT MAX(id) FROM parcel_events WHERE parcel_id = ?) AND comment = ''").run(w.name_ru, id);
-  for (const f of req.files || []) {
-    const name = `${crypto.randomUUID()}.jpg`;
-    fs.writeFileSync(require('path').join(PHOTO_DIR, name), f.buffer);
-    db.prepare('INSERT INTO parcel_photos (parcel_id, file) VALUES (?, ?)').run(id, name);
-  }
-  db.exec('COMMIT');
-  res.redirect(`/admin/receive?done=${id}`);
-});
-
-app.get('/admin/parcels/:id/wa', (req, res) => {
-  const p = db.prepare('SELECT * FROM parcels WHERE id = ?').get(parseInt(req.params.id, 10));
-  if (!p || !p.client_id || !p.photo_token) return res.redirect('/admin/parcels');
-  const client = getClient(p.client_id);
-  if (isStub(client)) return res.redirect(`/admin/clients?code=${encodeURIComponent(dispCode(client.code))}#add`);
-  db.prepare("UPDATE parcels SET wa_sent_at = datetime('now') WHERE id = ?").run(p.id);
-  res.redirect(waArrivalUrl(req, p));
-});
 
 app.get('/admin/parcels', (req, res) => {
   const t = req.t; const q = String(req.query.q || '').trim(); const st = STATUSES[req.query.status] ? req.query.status : '';
@@ -883,7 +790,7 @@ app.post('/admin/import-invoices', upload.single('file'), (req, res) => {
 
 app.get('/admin/invoices', (req, res) => {
   const t = req.t;
-  const invoices = db.prepare(`SELECT i.*, c.code, c.name FROM invoices i JOIN clients c ON c.id = i.client_id ORDER BY i.id DESC LIMIT 300`).all();
+  const invoices = db.prepare(`SELECT i.*, c.code, c.name, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i JOIN clients c ON c.id = i.client_id ORDER BY i.id DESC LIMIT 300`).all();
   adminRender(req, res, t('a_invoices'), `<div class="card"><form method="get" action="/admin/invoices/new" class="row"><div><label>${esc(t('a_pick_client'))}</label><input name="code" required placeholder="D1600"></div><button>${esc(t('a_new_invoice'))}</button><a class="btn sec" href="/admin/import#inv">${esc(t('a_inv_import'))}</a></form></div>
   <div class="card">${invoicesTable(t, invoices, '/admin/invoices/')}</div>`);
 });
@@ -1010,9 +917,33 @@ app.post('/admin/invoices/:id/delete', (req, res) => {
   const id = parseInt(req.params.id, 10);
   db.exec('BEGIN');
   db.prepare('UPDATE parcels SET invoice_id = NULL WHERE invoice_id = ?').run(id);
+  for (const ph of invoicePhotos(id)) { try { fs.unlinkSync(require('path').join(PHOTO_DIR, ph.file)); } catch {} }
+  db.prepare('DELETE FROM invoice_photos WHERE invoice_id = ?').run(id);
   db.prepare('DELETE FROM invoices WHERE id = ?').run(id);
   db.exec('COMMIT');
   res.redirect('/admin/invoices');
+});
+
+app.post('/admin/invoices/:id/photos', photoUpload.array('photos', 10), (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (db.prepare('SELECT 1 FROM invoices WHERE id = ?').get(id)) {
+    for (const f of req.files || []) {
+      const name = `${crypto.randomUUID()}.jpg`;
+      fs.writeFileSync(require('path').join(PHOTO_DIR, name), f.buffer);
+      db.prepare('INSERT INTO invoice_photos (invoice_id, file) VALUES (?, ?)').run(id, name);
+    }
+  }
+  const back = String(req.body.back || '');
+  res.redirect(back.startsWith('/admin/') ? back : `/admin/invoices/${id}`);
+});
+
+app.post('/admin/invoices/:id/photos/:pid/delete', (req, res) => {
+  const ph = db.prepare('SELECT * FROM invoice_photos WHERE id = ? AND invoice_id = ?').get(parseInt(req.params.pid, 10), parseInt(req.params.id, 10));
+  if (ph) {
+    db.prepare('DELETE FROM invoice_photos WHERE id = ?').run(ph.id);
+    try { fs.unlinkSync(require('path').join(PHOTO_DIR, ph.file)); } catch {}
+  }
+  res.redirect(`/admin/invoices/${parseInt(req.params.id, 10)}`);
 });
 
 app.post('/admin/invoices/:id/paid', (req, res) => {
@@ -1046,9 +977,6 @@ app.get('/admin/settings', (req, res) => {
     <div class="card"><h2>${esc(t('nav_info'))}</h2><p class="muted">${esc(t('s_info_hint'))}</p>
       <label>рус</label><textarea name="info_ru" style="min-height:260px">${esc(setting('info_ru'))}</textarea>
       <label>中文</label><textarea name="info_zh" style="min-height:260px">${esc(setting('info_zh'))}</textarea></div>
-    <div class="card"><h2>${esc(t('s_wa_arrival'))}</h2><p class="muted">{name} {mark} {warehouse} {places} {weight} {link}</p>
-      <label>рус</label><textarea name="wa_arrival_ru" style="min-height:80px">${esc(setting('wa_arrival_ru'))}</textarea>
-      <label>中文</label><textarea name="wa_arrival_zh" style="min-height:80px">${esc(setting('wa_arrival_zh'))}</textarea></div>
     <div class="card"><h2>${esc(t('s_invoice'))}</h2><div class="row"><div><label>${esc(t('s_inv_company'))}</label><input name="invoice_company" value="${esc(setting('invoice_company'))}"></div>
       <div><label>${esc(t('s_inv_title'))}</label><input name="invoice_title" value="${esc(setting('invoice_title'))}"></div></div>
       <label>${esc(t('s_inv_rules'))}</label><textarea name="invoice_rules" style="min-height:320px">${esc(setting('invoice_rules'))}</textarea></div>
@@ -1073,7 +1001,7 @@ app.post('/admin/settings', (req, res) => {
     db.prepare(`INSERT INTO warehouses (${f.join(', ')}) VALUES (${f.map(() => '?').join(', ')})`).run(...f.map((k) => String(b[`wh_new_${k}`] || '').trim()));
   }
   for (const c of db.prepare('SELECT id FROM cities').all()) db.prepare('UPDATE cities SET pickup_address = ? WHERE id = ?').run(String(b[`city_${c.id}`] ?? '').trim(), c.id);
-  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'invoice_company', 'invoice_title', 'invoice_rules', 'wa_arrival_ru', 'wa_arrival_zh']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
+  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'invoice_company', 'invoice_title', 'invoice_rules']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
   db.exec('COMMIT');
   req.session.flash = req.t('saved');
   res.redirect('/admin/settings');

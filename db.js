@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS parcel_events (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS invoice_photos (
+  id INTEGER PRIMARY KEY,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+  file TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS parcel_photos (
   id INTEGER PRIMARY KEY,
   parcel_id INTEGER NOT NULL REFERENCES parcels(id),
