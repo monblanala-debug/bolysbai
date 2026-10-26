@@ -227,6 +227,10 @@ seed();
   const def = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
   def.run('wa_arrival_ru', 'Здравствуйте, {name}! Ваша посылка {mark} прибыла на склад {warehouse}. Мест: {places}{weight}. Фото: {link}');
   def.run('wa_arrival_zh', '您好，{name}！您的包裹 {mark} 已到达{warehouse}仓库。件数：{places}{weight}。照片：{link}');
+  def.run('promo_title_ru', 'Не получается оплатить поставщику?');
+  def.run('promo_text_ru', 'Оплатим заказ на 1688, Taobao, Pinduoduo, пополним Alipay и WeChat в юанях. Напишите — поможем.');
+  def.run('promo_title_zh', '无法付款给供应商？');
+  def.run('promo_text_zh', '我们帮您支付 1688、淘宝、拼多多订单，充值支付宝和微信人民币。');
   def.run('invoice_company', '义乌市坦达供应链管理有限公司');
   def.run('invoice_title', '151库 Cargo');
   def.run('invoice_rules', `ПРАВИЛА ОТПРАВКИ ГРУЗОВ ИЗ КИТАЯ

@@ -93,6 +93,11 @@ body{padding-bottom:72px}
 .invlist{display:grid;gap:10px}.inv{border:1px solid var(--line,#eee);border-radius:12px;padding:12px 14px}.inv .badge{margin-right:4px}
 .cnt{display:inline-block;min-width:20px;padding:0 6px;border-radius:10px;background:var(--brand);color:#fff;font-size:12px;line-height:20px;text-align:center}
 .prow{display:flex;gap:12px;align-items:center}.prow>div{flex:1;min-width:0}
+.promo{display:flex;align-items:center;gap:12px;background:linear-gradient(90deg,#fff1f1,#fff);border:1px solid #f6c9cb;border-left:4px solid var(--brand);border-radius:12px;padding:12px 14px;margin:0 0 16px}
+.promo-ic{flex:0 0 40px;height:40px;border-radius:50%;background:var(--brand);color:#fff;font-weight:800;font-size:20px;display:flex;align-items:center;justify-content:center}
+.promo-tx{flex:1;min-width:0;font-size:14px;line-height:1.35}.promo-tx b{display:block;font-size:15px;margin-bottom:2px}.promo-tx span{color:#6b5b5c}
+.promo-btn{flex:0 0 auto;background:#22c55e;padding:9px 14px;font-size:14px}
+@media (max-width:520px){.promo{flex-wrap:wrap}.promo-btn{flex:1 0 100%;text-align:center}}
 @media print{header,footer,.wa-fab,.noprint{display:none!important}.wb-sheet{width:auto!important;transform:none!important;font-size:12px}.wb-fit{height:auto!important}.wb .goods .l{font-size:10px}.wb .v{font-size:13px}.card{border:0}body{background:#fff}}
 `;
 

@@ -80,6 +80,17 @@ const notice = (req) => {
   return n ? `<div class="alert warn"><a href="/info">${esc(n)}</a></div>` : '';
 };
 
+// Плашка «поможем оплатить» — на главных страницах клиента; текст меняется в настройках.
+const promo = (req) => {
+  const zh = req.lang === 'zh';
+  const title = setting(zh ? 'promo_title_zh' : 'promo_title_ru'); const text = setting(zh ? 'promo_text_zh' : 'promo_text_ru');
+  if (!title) return '';
+  const wa = setting('whatsapp');
+  const msg = zh ? '您好！需要帮忙付款/充值人民币。' : 'Здравствуйте! Нужна помощь с оплатой поставщику / пополнением юаней.';
+  return `<div class="promo noprint"><div class="promo-ic">¥</div><div class="promo-tx"><b>${esc(title)}</b><span>${esc(text)}</span></div>
+    ${wa ? `<a class="btn promo-btn" href="https://wa.me/${esc(wa)}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">${esc(req.t('promo_btn'))}</a>` : ''}</div>`;
+};
+
 // Простая разметка: «# заголовок», «- пункт», остальное — абзацы.
 function renderInfo(text) {
   let html = ''; let list = false;
@@ -129,7 +140,7 @@ app.get('/', (req, res) => {
         ${cities.map((c, i) => `<label><input type="radio" name="city_id" value="${c.id}" data-name="${esc(c.name)}" required${i === 0 ? ' id="f-city-first"' : ''}><span>${esc(c.name)}</span></label>`).join('')}</div>
       <div class="hint">${esc(t('city_hint'))}</div>
       <button class="wide">${esc(t('get_code'))}</button>
-    </form></div>
+    </form></div>${promo(req)}
 </div>${heroMap(t, req.lang)}`);
 });
 
@@ -203,7 +214,7 @@ app.get('/address', (req, res) => {
     ${row('f-n', t('receiver'), f.name)}${row('f-p', t('receiver_phone'), f.phone)}${row('f-a', t('address'), f.address)}
     <p class="muted">${esc(t('rules'))}</p>
     ${keepers(req, whs)}
-    </div>
+    </div>${promo(req)}
     <div class="card"><h3>${esc(t('pickup'))}${client.city_name ? ' · ' + esc(client.city_name) : ''}</h3>
       <div class="addr">${esc(client.pickup_address || '—')}</div>
       <p><a class="btn sec" href="/cabinet">${esc(t('goto_cabinet'))}</a></p></div></div>`);
@@ -240,7 +251,7 @@ app.get('/track', (req, res) => {
   res.render(t('track_title'), `<div class="card"><h1>${esc(t('track_title'))}</h1>
     <form method="get"><textarea name="q" placeholder="${esc(t('track_placeholder'))}">${esc(tracks.join('\n'))}</textarea>
     <p><button>${esc(t('track_btn'))}</button></p></form>
-    </div>${results}`);
+    </div>${results}${promo(req)}`);
 });
 
 // ---------- Фото груза на весах к накладной ----------
@@ -294,7 +305,7 @@ app.get('/cabinet', (req, res) => {
   const w = activeWarehouses()[0];
   res.render(t('nav_cabinet'), `<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
     <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
-    <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>
+    <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>${promo(req)}
     <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoicesTable(t, invoices, '/invoice/')}</div>
 `);
 });
@@ -977,6 +988,9 @@ app.get('/admin/settings', (req, res) => {
     <div class="card"><h2>${esc(t('nav_info'))}</h2><p class="muted">${esc(t('s_info_hint'))}</p>
       <label>рус</label><textarea name="info_ru" style="min-height:260px">${esc(setting('info_ru'))}</textarea>
       <label>中文</label><textarea name="info_zh" style="min-height:260px">${esc(setting('info_zh'))}</textarea></div>
+    <div class="card"><h2>${esc(t('s_promo'))}</h2><p class="muted">${esc(t('s_promo_hint'))}</p>
+      <div class="row"><div><label>рус</label><input name="promo_title_ru" value="${esc(setting('promo_title_ru'))}"></div><div><label>中文</label><input name="promo_title_zh" value="${esc(setting('promo_title_zh'))}"></div></div>
+      <div class="row"><div><label>рус</label><input name="promo_text_ru" value="${esc(setting('promo_text_ru'))}"></div><div><label>中文</label><input name="promo_text_zh" value="${esc(setting('promo_text_zh'))}"></div></div></div>
     <div class="card"><h2>${esc(t('s_invoice'))}</h2><div class="row"><div><label>${esc(t('s_inv_company'))}</label><input name="invoice_company" value="${esc(setting('invoice_company'))}"></div>
       <div><label>${esc(t('s_inv_title'))}</label><input name="invoice_title" value="${esc(setting('invoice_title'))}"></div></div>
       <label>${esc(t('s_inv_rules'))}</label><textarea name="invoice_rules" style="min-height:320px">${esc(setting('invoice_rules'))}</textarea></div>
@@ -1001,7 +1015,7 @@ app.post('/admin/settings', (req, res) => {
     db.prepare(`INSERT INTO warehouses (${f.join(', ')}) VALUES (${f.map(() => '?').join(', ')})`).run(...f.map((k) => String(b[`wh_new_${k}`] || '').trim()));
   }
   for (const c of db.prepare('SELECT id FROM cities').all()) db.prepare('UPDATE cities SET pickup_address = ? WHERE id = ?').run(String(b[`city_${c.id}`] ?? '').trim(), c.id);
-  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'invoice_company', 'invoice_title', 'invoice_rules']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
+  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'invoice_company', 'invoice_title', 'invoice_rules', 'promo_title_ru', 'promo_title_zh', 'promo_text_ru', 'promo_text_zh']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
   db.exec('COMMIT');
   req.session.flash = req.t('saved');
   res.redirect('/admin/settings');
