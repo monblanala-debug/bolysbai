@@ -11,7 +11,6 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin151';
 // Бухгалтер: работает с посылками и накладными, но не видит телефоны клиентов и настройки.
 const ACCOUNTANT_PASSWORD = process.env.ACCOUNTANT_PASSWORD || 'buh151';
 const PORT = process.env.PORT || 3000;
-const LEGACY_TRACK_URL = 'http://151.likerj.com';
 const isOwner = (req) => req.session.admin === 'owner';
 // Код для людей: цифровые коды пишем с D (D1600), старые буквенные (Y58, AB016) как есть.
 const dispCode = (code) => (/^\d/.test(code) ? `D${code}` : code);
@@ -43,6 +42,8 @@ const statusBadge = (t, s) => `<span class="badge b-${esc(s)}">${esc(t('st_' + s
 const statusOptions = (t, sel) => Object.keys(STATUSES).map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(t('st_' + k))}</option>`).join('');
 const whName = (lang, w) => (lang === 'zh' ? w.name_zh : w.name_ru);
 const money = (v) => `${(Math.round(v * 100) / 100).toLocaleString('ru-RU')} ${setting('currency')}`;
+// «26.10 11:10» для приёмки.
+const fmtDT = (s) => (s ? `${String(s).slice(8, 10)}.${String(s).slice(5, 7)} ${String(s).slice(11, 16)}` : '');
 const fmtDate = (s) => (s ? String(s).slice(0, 16).replace('T', ' ') : '');
 const activeWarehouses = () => db.prepare('SELECT * FROM warehouses WHERE active = 1 ORDER BY id').all();
 const getClient = (id) => db.prepare(`SELECT c.*, ci.name city_name, ci.pickup_address FROM clients c
@@ -215,25 +216,31 @@ function parcelHistory(t, parcelId) {
     .map((e) => `<div>${esc(fmtDate(e.created_at))} — ${esc(t('st_' + e.status))}${e.comment ? ' · ' + esc(e.comment) : ''}</div>`).join('');
 }
 
+const INV_STATUSES = ['transit', 'border', 'arrived', 'delivered'];
+const invStatusOptions = (t, sel) => INV_STATUSES.map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(t('st_' + k))}</option>`).join('');
+// Номер накладной без учёта регистра и пробелов: d1601-1030-4 → D1601-1030-4.
+const findInvoice = (no) => db.prepare('SELECT * FROM invoices WHERE number = ?').get(String(no || '').trim().toUpperCase().replace(/\s+/g, ''));
+
 app.get('/track', (req, res) => {
   const t = req.t;
   const tracks = String(req.query.q || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean).slice(0, 50);
   let results = '';
   if (tracks.length) {
-    results = `<div class="fade">${tracks.map((tr) => {
-      const p = db.prepare('SELECT * FROM parcels WHERE track = ?').get(tr);
-      if (!p) return `<div class="card"><b>${esc(tr)}</b><p class="muted" style="margin:4px 0 0">${esc(t('track_none'))}</p></div>`;
-      return `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(p.track)}</b><div style="flex:0 0 auto">${statusBadge(t, p.status)}</div></div>
-        ${statusLine(t, p.status)}
-        <div class="muted">${esc(t('weight'))}: ${p.weight || '—'} · ${esc(t('places'))}: ${p.places || '—'}${p.description ? ' · ' + esc(p.description) : ''}</div>
-        ${p.photo_token ? `<p style="margin:8px 0 0"><a href="/p/${esc(p.photo_token)}">📷 ${esc(t('photo'))}</a></p>` : ''}
-        <details class="hist"><summary>${esc(t('history'))}</summary>${parcelHistory(t, p.id)}</details></div>`;
+    results = `<div class="fade">${tracks.map((no) => {
+      const i = findInvoice(no);
+      if (!i) return `<div class="card"><b>${esc(no)}</b><p class="muted" style="margin:4px 0 0">${esc(t('track_none'))}</p></div>`;
+      const st = INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit';
+      return `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(i.number)}</b><div style="flex:0 0 auto">${statusBadge(t, st)}</div></div>
+        ${statusLine(t, st)}
+        <div class="muted">${esc(t('inv_sent'))}: ${esc(fmtDay(i.inv_date || i.created_at))}${i.origin || i.destination ? ` · ${esc(i.origin)} → ${esc(i.destination)}` : ''}</div>
+        <div class="muted">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}</div>
+        <p style="margin:10px 0 0"><a class="btn sec sm" href="/invoice/${i.id}">${esc(t('inv_view'))}</a></p></div>`;
     }).join('')}</div>`;
   }
   res.render(t('track_title'), `<div class="card"><h1>${esc(t('track_title'))}</h1>
     <form method="get"><textarea name="q" placeholder="${esc(t('track_placeholder'))}">${esc(tracks.join('\n'))}</textarea>
     <p><button>${esc(t('track_btn'))}</button></p></form>
-    <p class="muted" style="font-size:13px">151.likerj.com: <a href="${LEGACY_TRACK_URL}" target="_blank" rel="noopener">运踪查询</a> · <a href="${LEGACY_TRACK_URL}/ZXYZ.php" target="_blank" rel="noopener">运踪列表查询</a></p></div>${results}`);
+    </div>${results}`);
 });
 
 // ---------- Фото посылки по ссылке из WhatsApp (без входа) ----------
@@ -262,10 +269,18 @@ app.get('/p/:token', (req, res) => {
 
 function invoicesTable(t, invoices, base) {
   if (!invoices.length) return `<p class="muted">${esc(t('no_invoices'))}</p>`;
+  // Клиенту — карточками, чтобы на телефоне всё помещалось без прокрутки вбок.
+  if (base === '/invoice/') return `<div class="invlist">${invoices.map((i) => `<div class="inv">
+    <div class="row" style="align-items:center"><b style="font-size:17px">${esc(i.number)}</b><span class="muted" style="flex:0 0 auto">${esc(fmtDay(i.inv_date || i.created_at))}</span></div>
+    <div class="muted" style="margin:4px 0">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}</div>
+    <div class="row" style="align-items:center"><div style="flex:0 0 auto">${statusBadge(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit')}
+      ${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</div>
+      <b style="font-size:20px;color:var(--brand);text-align:right">${esc(money(i.amount))}</b></div>
+    <a class="btn sec" style="display:block;text-align:center;margin-top:10px" href="${base}${i.id}">${esc(t('inv_view'))}</a></div>`).join('')}</div>`;
   return `<div class="tbl"><table><tr><th>${esc(t('date'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('inv_cargo'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th></tr>
   ${invoices.map((i) => `<tr><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b>${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}</td>
   <td>${esc(cargoSummary(t, i))}</td><td><b>${esc(money(i.amount))}</b></td>
-  <td>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
+  <td><div style="margin-bottom:4px">${statusBadge(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit')}</div>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
   <td><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a></td></tr>`).join('')}</table></div>`;
 }
 
@@ -279,18 +294,18 @@ app.get('/cabinet', (req, res) => {
       <label>${esc(t('code'))}</label><input name="code" required><p><button>${esc(t('login_btn'))}</button></p></form>
       <a href="/">${esc(t('get_code'))}</a></div>`);
   }
-  const parcels = db.prepare('SELECT * FROM parcels WHERE client_id = ? ORDER BY updated_at DESC').all(client.id);
   const invoices = db.prepare('SELECT * FROM invoices WHERE client_id = ? ORDER BY id DESC').all(client.id);
+  const received = db.prepare(`SELECT p.*, ${req.lang === 'zh' ? 'w.name_zh' : 'w.name_ru'} wh FROM parcels p LEFT JOIN warehouses w ON w.id = p.warehouse_id
+    WHERE p.client_id = ? AND p.photo_token IS NOT NULL ORDER BY p.id DESC LIMIT 30`).all(client.id);
   const w = activeWarehouses()[0];
-  const pRows = parcels.length ? `<div class="tbl"><table><tr><th>${esc(t('track'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('photo'))}</th><th>${esc(t('date'))}</th></tr>
-    ${parcels.map((p) => `<tr><td><a href="/track?q=${encodeURIComponent(p.track)}">${esc(p.track)}</a></td><td>${statusBadge(t, p.status)}${statusLine(t, p.status, true)}</td><td>${p.weight || ''}</td><td>${p.places || ''}</td><td>${esc(p.description)}</td>
-    <td>${p.photo_token ? `<a href="/p/${esc(p.photo_token)}">📷 ${esc(t('look'))}</a>` : ''}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}</table></div>`
-    : `<p class="muted">${esc(t('no_parcels'))}</p>`;
   res.render(t('nav_cabinet'), `<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
     <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
     <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>
-    <div class="card"><h2>${esc(t('my_parcels'))}</h2>${pRows}</div>
-    <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoicesTable(t, invoices, '/invoice/')}</div>`);
+    <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoicesTable(t, invoices, '/invoice/')}</div>
+    ${received.length ? `<div class="card"><h2>${esc(t('my_parcels'))}</h2><p class="muted" style="margin-top:-6px">${esc(t('received_hint'))}</p><div class="invlist">${received.map((p) => { const ph = parcelPhotos(p.id)[0]; return `<a class="inv prow" href="/p/${esc(p.photo_token)}" style="color:inherit;text-decoration:none">
+      ${ph ? `<img src="/photo/${esc(ph.file)}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex:0 0 64px">` : ''}
+      <div style="min-width:0"><b>${esc(fmtDT(p.created_at))}</b><div class="muted" style="font-size:14px">${p.wh ? `${esc(p.wh)} · ` : ''}${esc(t('places'))}: ${p.places}${p.weight ? ` · ${p.weight} ${esc(t('kg'))}` : ''}${p.description ? ` · ${esc(p.description)}` : ''}</div></div>
+      <span style="flex:0 0 auto;margin-left:auto">📷</span></a>`; }).join('')}</div></div>` : ''}`);
 });
 
 app.post('/cabinet/login', (req, res) => {
@@ -371,7 +386,8 @@ app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
 const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/receive', 'a_receive'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/settings', 'a_settings']];
 function adminRender(req, res, title, body) {
   const role = `<span class="badge" style="margin-left:auto">${esc(req.t(isOwner(req) ? 'role_owner' : 'role_accountant'))}</span>`;
-  const tabs = ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings').map(([h, k]) => `<a href="${h}" class="${req.path === h || (h !== '/admin' && req.path.startsWith(h)) ? 'on' : ''}">${esc(req.t(k))}</a>`).join('');
+  const pend = db.prepare('SELECT COUNT(*) c FROM parcels WHERE photo_token IS NOT NULL AND wa_sent_at IS NULL AND client_id IS NOT NULL').get().c;
+  const tabs = ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings').map(([h, k]) => `<a href="${h}" class="${req.path === h || (h !== '/admin' && req.path.startsWith(h)) ? 'on' : ''}">${esc(req.t(k))}${h === '/admin/receive' && pend ? ` <span class="cnt">${pend}</span>` : ''}</a>`).join('');
   const flash = req.session.flash; delete req.session.flash;
   res.render(title, `<div class="subnav noprint">${tabs}${role}</div>${flash ? `<div class="alert ok">${esc(flash)}</div>` : ''}${body}`);
 }
@@ -398,7 +414,8 @@ app.get('/admin', (req, res) => {
   const t = req.t;
   const c = (sql) => db.prepare(sql).get().c;
   const byStatus = Object.keys(STATUSES).map((s) => `<a class="card" href="/admin/parcels?status=${s}" style="display:block;margin:0">${statusBadge(t, s)}<div class="stat">${c(`SELECT COUNT(*) c FROM parcels WHERE status = '${s}'`)}</div></a>`).join('');
-  adminRender(req, res, t('a_dashboard'), `<div class="grid g4">
+  const pending = pendingWa();
+  adminRender(req, res, t('a_dashboard'), `${pending.length ? pendingCard(t, pending) : ''}<div class="grid g4">
     <div class="card"><div class="muted">${esc(t('a_total_clients'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM clients')}</div></div>
     <div class="card"><div class="muted">${esc(t('a_total_parcels'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM parcels')}</div></div>
     <div class="card"><div class="muted">${esc(t('a_unpaid'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM invoices WHERE paid = 0')}</div></div>
@@ -452,7 +469,7 @@ function parcelsTable(req, parcels) {
   const t = req.t;
   if (!parcels.length) return `<p class="muted">${esc(t('no_parcels'))}</p>`;
   return `<form method="post" action="/admin/parcels/bulk"><div class="tbl"><table><tr><th><input type="checkbox" id="checkall" style="width:auto"></th><th>${esc(t('track'))}</th><th>${esc(t('client'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('invoice'))}</th><th>${esc(t('photo'))}</th><th>${esc(t('date'))}</th></tr>
-  ${parcels.map((p) => `<tr><td><input type="checkbox" name="ids" value="${p.id}" style="width:auto"></td><td><a href="/track?q=${encodeURIComponent(p.track)}">${esc(p.track)}</a></td>
+  ${parcels.map((p) => `<tr><td><input type="checkbox" name="ids" value="${p.id}" style="width:auto"></td><td>${esc(p.track)}</td>
   <td>${p.client_id ? `<a href="/admin/clients/${p.client_id}">${esc(p.client_code)}</a>` : `<span class="badge b-border">${esc(p.client_code || t('a_no_client'))}</span>`}</td>
   <td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td><td>${p.invoice_id ? `<a href="/admin/invoices/${p.invoice_id}">#${p.invoice_id}</a>` : ''}</td>
   <td style="white-space:nowrap">${p.photo_token ? `<a href="/p/${esc(p.photo_token)}" target="_blank">📷</a>` : ''}${p.client_id && p.photo_token ? ` <a href="/admin/parcels/${p.id}/wa" target="_blank" title="WhatsApp">${p.wa_sent_at ? '✓' : '➤'} WA</a>` : ''}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}
@@ -479,6 +496,17 @@ app.get('/admin/api/client', (req, res) => {
   res.json(client ? { name: client.name, city: client.city_name || '', code: dispCode(client.code) } : null);
 });
 
+// Посылки с фото, о которых ещё не написали клиенту: висят красным списком, пока не нажмут WhatsApp.
+const pendingWa = () => db.prepare(`SELECT p.*, c.name FROM parcels p JOIN clients c ON c.id = p.client_id
+  WHERE p.photo_token IS NOT NULL AND p.wa_sent_at IS NULL ORDER BY p.id LIMIT 100`).all();
+function pendingCard(t, pending) {
+  return `<div class="card" style="border:2px solid var(--brand)"><h2 style="margin-top:0;color:var(--brand)">⚠ ${esc(t('a_pending_wa'))}: ${pending.length}</h2>
+    <div class="invlist">${pending.map((p) => { const ph = parcelPhotos(p.id)[0]; return `<div class="inv prow">
+      ${ph ? `<img src="/photo/${esc(ph.file)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex:0 0 56px">` : ''}
+      <div style="min-width:0"><b>${esc(dispCode(p.client_code || ''))}</b> · ${esc(p.name)}<div class="muted" style="font-size:13px">${esc(fmtDT(p.created_at))} · ${esc(t('places'))}: ${p.places}</div></div>
+      <a class="btn wa-btn sm" style="flex:0 0 auto;font-size:14px;padding:10px 12px" href="/admin/parcels/${p.id}/wa" target="_blank" onclick="setTimeout(()=>location.reload(),1500)">WhatsApp</a></div>`; }).join('')}</div></div>`;
+}
+
 app.get('/admin/receive', (req, res) => {
   const t = req.t;
   const whs = activeWarehouses();
@@ -486,9 +514,10 @@ app.get('/admin/receive', (req, res) => {
   const done = req.query.done ? db.prepare('SELECT * FROM parcels WHERE id = ?').get(parseInt(req.query.done, 10)) : null;
   const doneClient = done && done.client_id ? getClient(done.client_id) : null;
   const recent = db.prepare(`SELECT * FROM parcels WHERE photo_token IS NOT NULL AND date(created_at) = date('now') ORDER BY id DESC LIMIT 30`).all();
-  adminRender(req, res, t('a_receive'), `${done ? `<div class="card" style="border:2px solid #22c55e"><h2 style="margin-top:0">✓ ${esc(t('a_receive_saved'))}: ${esc(dispCode(done.client_code || ''))}${doneClient ? ` · ${esc(doneClient.name)}` : ''}</h2>
+  const pending = pendingWa();
+  adminRender(req, res, t('a_receive'), `${pending.length && !done ? pendingCard(t, pending) : ''}${done ? `<div class="card" style="border:2px solid #22c55e"><h2 style="margin-top:0">✓ ${esc(t('a_receive_saved'))}: ${esc(dispCode(done.client_code || ''))}${doneClient ? ` · ${esc(doneClient.name)}` : ''}</h2>
       ${photoGrid(parcelPhotos(done.id))}
-      ${doneClient ? `<p><a class="btn wa-btn" href="/admin/parcels/${done.id}/wa" target="_blank">${esc(t('a_send_wa'))}</a></p>` : `<p class="alert err">${esc(t('a_no_client'))}</p>`}</div>` : ''}
+      ${doneClient ? `<p><a class="btn wa-btn" href="/admin/parcels/${done.id}/wa" target="_blank" onclick="setTimeout(()=>location.href='/admin/receive',1500)">${esc(t('a_send_wa'))}</a></p>` : `<p class="alert err">${esc(t('a_no_client'))}</p>`}</div>` : ''}
   <div class="card"><h2 style="margin-top:0">${esc(t('a_receive_title'))}</h2><p class="muted">${esc(t('a_receive_hint'))}</p>
   <form method="post" action="/admin/receive" enctype="multipart/form-data" id="rcv">
     <div class="seg" style="margin-bottom:10px">${whs.map((w) => `<label><input type="radio" name="warehouse_id" value="${w.id}" ${w.id === lastWh ? 'checked' : ''}><span>${esc(whName(req.lang, w))}</span></label>`).join('')}</div>
@@ -823,7 +852,7 @@ function invoiceForm(req, client, inv) {
   <div class="row">${inp('rate', '单价', 'Цена')}<div><label>за · 按</label><select name="price_basis" id="i-price_basis"><option value="m3" ${v.price_basis !== 'kg' ? 'selected' : ''}>м³</option><option value="kg" ${v.price_basis === 'kg' ? 'selected' : ''}>кг</option></select></div>
     ${inp('freight', '运费 $', 'Фрахт')}${inp('goods_value', '货值 $', 'Стоимость товара')}${inp('ins_rate', '保率 %', 'Страховка %')}${inp('ins_fee', '保险费 $', 'Страховка $')}</div>
   <div class="row">${inp('packing', '打包方式', 'Упаковка', 'list="dl-pack"')}${inp('pack_fee', '包装费 $', 'За упаковку')}${inp('advance', '垫付款 $', 'Перевод на заказ')}${inp('unload_fee', '落地费 $', 'За разгрузку')}${inp('other_fee', '其他款项 $', 'Другие платежи')}</div>
-  <div class="row">${inp('cargo_status', '运踪', t('inv_cargo_status'), 'placeholder="3.13到"')}${inp('pay_note', '付款', t('inv_pay_note'))}</div>
+  <div class="row"><div><label>${esc(t('status'))}</label><select name="inv_status">${invStatusOptions(t, v.inv_status || 'transit')}</select></div>${inp('cargo_status', '运踪', t('inv_cargo_status'), 'placeholder="3.13到"')}${inp('pay_note', '付款', t('inv_pay_note'))}</div>
   <div class="row">${inp('note', '备注', 'Замечание')}${inp('number', '货号', `${t('invoice_no')} (${t('inv_auto')})`, `placeholder="D${esc(client.code)}-MMDD-мест" ${inv ? 'data-touched="1"' : ''}`)}
     <div><label>总计 · ${esc(t('total'))}</label><div class="stat" id="i-total" style="color:var(--brand)">0</div></div></div>
   <p><button>${esc(inv ? t('save') : t('create'))}</button></p></form></div>
@@ -855,6 +884,7 @@ function saveInvoice(b, existing) {
   const v = {};
   for (const k of ['origin', 'destination', 'transport', 'delivery_time', 'sender', 'consignee', 'goods', 'packing', 'note', 'cargo_status', 'pay_note']) v[k] = String(b[k] || '').trim().slice(0, 300);
   for (const k of NUM_FIELDS) v[k] = numOrNull(String(b[k] ?? '').replace(',', '.'));
+  v.inv_status = INV_STATUSES.includes(b.inv_status) ? b.inv_status : /到|прибыл/i.test(v.cargo_status) ? 'arrived' : existing ? existing.inv_status : 'transit';
   v.inv_date = /^\d{4}-\d{2}-\d{2}$/.test(b.inv_date) ? b.inv_date : new Date().toISOString().slice(0, 10);
   v.price_basis = b.price_basis === 'kg' ? 'kg' : 'm3';
   // Пустые поля заполняем из выбранных посылок и по формулам, как в бумажной накладной.

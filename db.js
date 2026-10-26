@@ -84,6 +84,8 @@ for (const [table, col, def] of [
     .map((c) => ['invoices', c, "TEXT DEFAULT ''"]),
   ['invoices', 'price_basis', "TEXT DEFAULT 'm3'"],
   ['invoices', 'cargo_status', "TEXT DEFAULT ''"],
+  // Где груз по накладной: transit → border → arrived → delivered (клиент видит в «Отследить»).
+  ['invoices', 'inv_status', "TEXT DEFAULT 'transit'"],
   ['invoices', 'pay_note', "TEXT DEFAULT ''"],
   // Клиенты со старым кодом (D185, Y58…), добавленные вручную: не сдвигают нумерацию новых кодов.
   ['clients', 'legacy', 'INTEGER DEFAULT 0'],

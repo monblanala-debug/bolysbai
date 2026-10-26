@@ -90,6 +90,9 @@ body{padding-bottom:72px}
 .only-m{display:none}@media (max-width:720px){.only-m{display:block}}
 .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:10px 0}.photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;display:block;background:#eee}
 .photo-btn{display:block;text-align:center;font-size:18px;padding:16px;margin:6px 0}.wa-btn{background:#22c55e;font-size:18px;padding:14px 22px}
+.invlist{display:grid;gap:10px}.inv{border:1px solid var(--line,#eee);border-radius:12px;padding:12px 14px}.inv .badge{margin-right:4px}
+.cnt{display:inline-block;min-width:20px;padding:0 6px;border-radius:10px;background:var(--brand);color:#fff;font-size:12px;line-height:20px;text-align:center}
+.prow{display:flex;gap:12px;align-items:center}.prow>div{flex:1;min-width:0}
 @media print{header,footer,.wa-fab,.noprint{display:none!important}.wb-sheet{width:auto!important;transform:none!important;font-size:12px}.wb-fit{height:auto!important}.wb .goods .l{font-size:10px}.wb .v{font-size:13px}.card{border:0}body{background:#fff}}
 `;
 
