@@ -53,6 +53,9 @@ footer{max-width:1100px;margin:0 auto;padding:8px max(16px,env(safe-area-inset-l
 @keyframes drive{from{transform:translateX(-160px)}to{transform:translateX(960px)}}
 @media (prefers-reduced-motion:reduce){.route.flow,.pulse,.truck{animation:none}.mover{display:none}}
 @media (max-width:720px){header .in{gap:8px 12px}header nav{order:3;flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;gap:16px;padding-bottom:4px;scrollbar-width:none}header nav a{white-space:nowrap}.lang{margin-left:auto}}
+.wa-fab{position:fixed;right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;gap:8px;background:#25d366;color:#fff;font-weight:700;padding:10px 16px 10px 12px;border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.18);z-index:15}.wa-fab:hover{text-decoration:none;background:#1ebe5a}
+@media (max-width:720px){.wa-fab span{display:none}.wa-fab{padding:12px}}
+body{padding-bottom:72px}
 @media print{header,.noprint{display:none!important}.card{border:0}body{background:#fff}}
 `;
 
@@ -64,7 +67,9 @@ document.querySelectorAll('[data-wh]').forEach(x=>x.classList.toggle('sec',x!==b
 document.addEventListener('change',e=>{if(e.target.id==='checkall')document.querySelectorAll('input[name=ids]').forEach(c=>c.checked=e.target.checked)});
 `;
 
-function page({ title, body, t, lang, path, session }) {
+function page({ title, body, t, lang, path, session, whatsapp }) {
+  const wa = String(whatsapp || '').replace(/\D/g, '');
+  const waPretty = wa.length === 13 ? `+${wa.slice(0, 2)} ${wa.slice(2, 5)} ${wa.slice(5, 9)} ${wa.slice(9)}` : `+${wa}`;
   const navItems = [['/', 'nav_home'], ['/track', 'nav_track'], ['/cabinet', 'nav_cabinet'], ['/services', 'nav_services'], ['/about', 'nav_about'], ['/info', 'nav_info']];
   const isOn = (href) => (href === '/' ? ['/', '/code', '/address'].includes(path) : path.startsWith(href) || (href === '/cabinet' && path.startsWith('/invoice')));
   const nav = navItems.map(([href, k]) => `<a href="${href}" class="${isOn(href) ? 'on' : ''}">${esc(t(k))}</a>`).join('');
@@ -74,7 +79,7 @@ function page({ title, body, t, lang, path, session }) {
 <title>${esc(title)} · ${esc(t('brand'))}</title><style>${CSS}</style></head><body>
 <header><div class="in"><a class="logo" href="/"><img src="/logo.png" alt="Cargo 151" width="96" height="45"></a><nav>${nav}${logout}</nav>
 <div class="lang"><a href="/lang/ru?back=${back}" class="${lang === 'ru' ? 'on' : ''}">RU</a><a href="/lang/zh?back=${back}" class="${lang === 'zh' ? 'on' : ''}">中文</a></div></div></header>
-<main>${body}</main><footer><a href="https://www.instagram.com/cargo.151" target="_blank" rel="noopener">Instagram @cargo.151</a> · <a href="/admin">${esc(t('nav_admin'))}</a></footer><script>${JS}</script></body></html>`;
+<main>${body}</main><footer>${wa ? `<a href="https://wa.me/${wa}" target="_blank" rel="noopener">WhatsApp ${esc(waPretty)}</a> · ` : ''}<a href="https://www.instagram.com/cargo.151" target="_blank" rel="noopener">Instagram @cargo.151</a> · <a href="/admin">${esc(t('nav_admin'))}</a></footer>${wa ? `<a class="wa-fab noprint" href="https://wa.me/${wa}" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path fill="#fff" d="M16 3a13 13 0 0 0-11.2 19.6L3 29l6.6-1.7A13 13 0 1 0 16 3zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.9 1 1-3.8-.3-.4A10.6 10.6 0 1 1 16 26.6zm5.8-7.9c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1a8.7 8.7 0 0 1-4.3-3.8c-.3-.6.3-.5 1-1.7.1-.2 0-.4 0-.5l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6a1.2 1.2 0 0 0-.9.4 3.7 3.7 0 0 0-1.1 2.7 6.4 6.4 0 0 0 1.3 3.4 14.7 14.7 0 0 0 5.7 5c2.1.9 2.9 1 4 .8a3.4 3.4 0 0 0 2.2-1.6 2.8 2.8 0 0 0 .2-1.6c-.1-.1-.3-.2-.6-.4z"/></svg><span>${esc(t('write_wa'))}</span></a>` : ''}<script>${JS}</script></body></html>`;
 }
 
 // Схематичная карта маршрутов: склады в Китае → города выдачи, с бегущими точками и фурой.

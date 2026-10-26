@@ -28,7 +28,7 @@ app.use((req, res, next) => {
   const m = /(?:^|;\s*)lang=(ru|zh)/.exec(req.headers.cookie || '');
   req.lang = m ? m[1] : (/^zh/i.test(req.headers['accept-language'] || '') ? 'zh' : 'ru');
   req.t = tr(req.lang);
-  res.render = (title, body) => res.send(page({ title, body, t: req.t, lang: req.lang, path: req.path, session: req.session }));
+  res.render = (title, body) => res.send(page({ title, body, t: req.t, lang: req.lang, path: req.path, session: req.session, whatsapp: setting('whatsapp') }));
   next();
 });
 
@@ -533,7 +533,8 @@ app.get('/admin/settings', (req, res) => {
     <div class="card"><h2>${esc(t('s_pickup'))}</h2>${cities.map((c) => `<label>${esc(c.name)}</label><input name="city_${c.id}" value="${esc(c.pickup_address)}">`).join('')}</div>
     <div class="card"><div class="row"><div><label>${esc(t('s_rate'))}</label><input name="rate_per_kg" value="${esc(setting('rate_per_kg'))}"></div>
     <div><label>${esc(t('s_currency'))}</label><input name="currency" value="${esc(setting('currency'))}"></div>
-    <div><label>${esc(t('s_code_start'))}</label><input name="code_start" value="${esc(setting('code_start'))}"></div></div>
+    <div><label>${esc(t('s_code_start'))}</label><input name="code_start" value="${esc(setting('code_start'))}"></div>
+    <div><label>WhatsApp</label><input name="whatsapp" value="${esc(setting('whatsapp'))}"></div></div>
     <p class="muted">${esc(t('a_password_note'))}</p></div>
     <p><button>${esc(t('save'))}</button></p></form>`);
 });
@@ -550,7 +551,7 @@ app.post('/admin/settings', (req, res) => {
     db.prepare(`INSERT INTO warehouses (${f.join(', ')}) VALUES (${f.map(() => '?').join(', ')})`).run(...f.map((k) => String(b[`wh_new_${k}`] || '').trim()));
   }
   for (const c of db.prepare('SELECT id FROM cities').all()) db.prepare('UPDATE cities SET pickup_address = ? WHERE id = ?').run(String(b[`city_${c.id}`] ?? '').trim(), c.id);
-  for (const k of ['rate_per_kg', 'currency', 'code_start', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
+  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
   db.exec('COMMIT');
   req.session.flash = req.t('saved');
   res.redirect('/admin/settings');
