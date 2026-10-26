@@ -9,6 +9,8 @@ REPO_URL="${1:-https://github.com/monblanala-debug/bolysbai.git}"
 DOMAIN="${2-cargo151.ru}"
 # Ubuntu 24.04 иначе спрашивает про перезапуск служб и ждёт ответа.
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+# Случайная строка. pipefail здесь отключаем: head закрывает трубу раньше tr, и это не ошибка.
+rand() { (set +o pipefail; tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"); }
 APP_DIR=/opt/cargo151
 DATA_DIR=/var/lib/cargo151
 ENV_FILE=/etc/cargo151.env
@@ -28,12 +30,12 @@ if [ -d "$APP_DIR/.git" ]; then git -C "$APP_DIR" pull --ff-only; else git clone
 
 # Пароль админки и секрет сессий создаются один раз и не меняются при обновлении.
 if [ ! -f "$ENV_FILE" ]; then
-  ADMIN_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
+  ADMIN_PASSWORD=$(rand 12)
   cat > "$ENV_FILE" <<EOF
 PORT=3000
 DB_PATH=$DATA_DIR/cargo151.db
 ADMIN_PASSWORD=$ADMIN_PASSWORD
-SESSION_SECRET=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48)
+SESSION_SECRET=$(rand 48)
 EOF
   chmod 600 "$ENV_FILE"
 fi
