@@ -284,11 +284,16 @@ function invoicesTable(t, invoices, base) {
       ${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</div>
       <b style="font-size:20px;color:var(--brand);text-align:right">${esc(money(i.amount))}</b></div>
     <a class="btn sec" style="display:block;text-align:center;margin-top:10px" href="${base}${i.id}">${esc(t('inv_view'))}</a></div>`).join('')}</div>`;
-  return `<div class="tbl"><table><tr><th>${esc(t('date'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('inv_cargo'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th></tr>
-  ${invoices.map((i) => `<tr><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b>${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}</td>
+  // Галочки привязаны к отдельной форме (form="bulkinv"), потому что в строках уже есть формы загрузки фото.
+  return `<div class="tbl"><table><tr><th><input type="checkbox" id="inv-all" style="width:auto"></th><th>${esc(t('date'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('inv_cargo'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th></tr>
+  ${invoices.map((i) => `<tr><td><input type="checkbox" name="ids" value="${i.id}" form="bulkinv" style="width:auto"></td><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b>${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}</td>
   <td>${esc(cargoSummary(t, i))}</td><td><b>${esc(money(i.amount))}</b></td>
   <td><div style="margin-bottom:4px">${statusBadge(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit')}</div>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
-  <td style="white-space:nowrap"><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a> ${photoForm(t, i.id, '/admin/invoices')}${i.pc ? ` <span class="muted">📷 ${i.pc}</span>` : ''}</td></tr>`).join('')}</table></div>${PHOTO_JS}`;
+  <td style="white-space:nowrap"><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a> ${photoForm(t, i.id, '/admin/invoices')}${i.pc ? ` <span class="muted">📷 ${i.pc}</span>` : ''}</td></tr>`).join('')}</table></div>
+  <form method="post" action="/admin/invoices/bulk" id="bulkinv" class="row" style="margin-top:12px"><div><label>${esc(t('a_bulk_inv'))}</label><select name="inv_status">${invStatusOptions(t, 'arrived')}</select></div>
+    <div><label>${esc(t('paid'))}</label><select name="paid"><option value="">—</option><option value="1">${esc(t('paid'))}</option><option value="0">${esc(t('unpaid'))}</option></select></div>
+    <button>${esc(t('apply'))}</button></form>
+  <script>document.getElementById('inv-all').addEventListener('change',(e)=>document.querySelectorAll('input[form=bulkinv][name=ids]').forEach((c)=>c.checked=e.target.checked))</script>${PHOTO_JS}`;
 }
 
 app.get('/cabinet', (req, res) => {
@@ -915,6 +920,17 @@ app.get('/admin/invoices/:id/edit', (req, res) => {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.id, 10));
   if (!inv) return res.redirect('/admin/invoices');
   adminRender(req, res, inv.number, invoiceForm(req, getClient(inv.client_id), inv));
+});
+
+app.post('/admin/invoices/bulk', (req, res) => {
+  const ids = [].concat(req.body.ids || []).map((x) => parseInt(x, 10)).filter(Boolean);
+  const st = INV_STATUSES.includes(req.body.inv_status) ? req.body.inv_status : null;
+  const paid = req.body.paid === '1' ? 1 : req.body.paid === '0' ? 0 : null;
+  db.exec('BEGIN');
+  for (const id of ids) db.prepare('UPDATE invoices SET inv_status = COALESCE(?, inv_status), paid = COALESCE(?, paid) WHERE id = ?').run(st, paid, id);
+  db.exec('COMMIT');
+  req.session.flash = `${req.t('saved')}: ${ids.length}`;
+  res.redirect('/admin/invoices');
 });
 
 app.post('/admin/invoices/:id', (req, res) => {
