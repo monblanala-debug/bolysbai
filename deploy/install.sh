@@ -26,19 +26,14 @@ if [ -d "$APP_DIR/.git" ]; then git -C "$APP_DIR" pull --ff-only; else git clone
 # Пароль админки и секрет сессий создаются один раз и не меняются при обновлении.
 if [ ! -f "$ENV_FILE" ]; then
   ADMIN_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
-  ACCOUNTANT_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
   cat > "$ENV_FILE" <<EOF
 PORT=3000
 DB_PATH=$DATA_DIR/cargo151.db
 ADMIN_PASSWORD=$ADMIN_PASSWORD
-ACCOUNTANT_PASSWORD=$ACCOUNTANT_PASSWORD
-KEEPER_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
 SESSION_SECRET=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48)
 EOF
   chmod 600 "$ENV_FILE"
 fi
-# Пароль кладовщика появился позже: добавляем в старый файл, если его там нет.
-grep -q '^KEEPER_PASSWORD=' "$ENV_FILE" || echo "KEEPER_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)" >> "$ENV_FILE"
 
 # Резервная копия каждую ночь в 03:30 в /var/backups/cargo151 (14 дней).
 echo "30 3 * * * root bash $APP_DIR/deploy/backup.sh" > /etc/cron.d/cargo151-backup
@@ -86,7 +81,5 @@ fi
 
 echo
 echo "Готово. Сайт: http://${DOMAIN:-$(curl -s ifconfig.me)}"
-echo "Админка: /admin"
-echo "  пароль владельца:   $(grep '^ADMIN_PASSWORD' "$ENV_FILE" | cut -d= -f2)"
-echo "  пароль бухгалтера:  $(grep '^ACCOUNTANT_PASSWORD' "$ENV_FILE" | cut -d= -f2)"
-echo "  пароль кладовщика:  $(grep '^KEEPER_PASSWORD' "$ENV_FILE" | cut -d= -f2)"
+echo "Админка: /admin — логин admin, пароль: $(grep '^ADMIN_PASSWORD' "$ENV_FILE" | cut -d= -f2)"
+echo "Сотрудникам (бухгалтер, менеджер, кладовщик) логины и пароли создаёт владелец: «Настройки» → «Сотрудники»."

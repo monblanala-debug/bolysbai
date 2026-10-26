@@ -89,6 +89,15 @@ CREATE TABLE IF NOT EXISTS forward_requests (
   status TEXT DEFAULT 'new',
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS staff (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  login TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL,
+  pw TEXT NOT NULL,
+  active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS parcel_photos (
   id INTEGER PRIMARY KEY,
   parcel_id INTEGER NOT NULL REFERENCES parcels(id),

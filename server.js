@@ -7,14 +7,23 @@ const { db, STATUSES, setting, normPhone, nextClientCode, shippingMark, upsertPa
 const { t: tr, LANGS } = require('./i18n');
 const { page, esc, heroMap, statusLine } = require('./layout');
 
+// Владелец входит логином admin и паролем из /etc/cargo151.env — так доступ не потеряется никогда.
+// Остальным сотрудникам владелец сам заводит логин и пароль в «Настройках» → «Сотрудники».
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin151';
-// Бухгалтер: работает с посылками и накладными, но не видит телефоны клиентов и настройки.
-const ACCOUNTANT_PASSWORD = process.env.ACCOUNTANT_PASSWORD || 'buh151';
-// Кладовщик: видит только список накладных без цен и загружает фото с весов.
-const KEEPER_PASSWORD = process.env.KEEPER_PASSWORD || 'sklad151';
+// Владелец — всё. Бухгалтер — всё, кроме номеров клиентов, настроек и удаления.
+// Менеджер и кладовщик — только фото с весов к накладным.
+const ROLES = ['owner', 'accountant', 'manager', 'keeper'];
 const PORT = process.env.PORT || 3000;
 const isOwner = (req) => req.session.admin === 'owner';
-const isKeeper = (req) => req.session.admin === 'keeper';
+// Кто куда может зайти в админке: первое совпавшее правило, иначе — владелец и бухгалтер.
+const ALL = ROLES; const MONEY = ['owner', 'accountant']; const OWNER = ['owner'];
+const ACL = [
+  [/^(GET|POST) \/(settings|backup)/, OWNER], [/^POST \/clients\/(import|add)$/, OWNER], [/^POST \/invoices\/\d+\/delete$/, OWNER],
+  [/^GET \/photos$/, ALL], [/^POST \/invoices\/\d+\/photos(\/\d+\/delete)?$/, ALL],
+];
+const can = (req, method, path) => { const k = `${method} ${path}`; const r = ACL.find(([re]) => re.test(k)); return (r ? r[1] : MONEY).includes(req.session.admin); };
+const photosOnly = (req) => ['manager', 'keeper'].includes(req.session.admin);
+const canMoney = (req) => MONEY.includes(req.session.admin);
 // Код для людей: цифровые коды пишем с D (D1600), старые буквенные (Y58, AB016) как есть.
 const dispCode = (code) => (/^\d/.test(code) ? `D${code}` : code);
 
@@ -283,7 +292,7 @@ function newsBlock(req) {
 
 // ---------- Личный кабинет ----------
 
-function invoicesTable(t, invoices, base) {
+function invoicesTable(t, invoices, base, withPaid = true) {
   if (!invoices.length) return `<p class="muted">${esc(t('no_invoices'))}</p>`;
   // Клиенту — карточками, чтобы на телефоне всё помещалось без прокрутки вбок.
   if (base === '/invoice/') return `<div class="invlist">${invoices.map((i) => `<div class="inv">
@@ -300,7 +309,7 @@ function invoicesTable(t, invoices, base) {
   <td><div style="margin-bottom:4px">${statusBadge(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit')}</div>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
   <td style="white-space:nowrap"><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a> ${photoForm(t, i.id, '/admin/invoices')}${i.pc ? ` <span class="muted">📷 ${i.pc}</span>` : ''}</td></tr>`).join('')}</table></div>
   <form method="post" action="/admin/invoices/bulk" id="bulkinv" class="row" style="margin-top:12px"><div><label>${esc(t('a_bulk_inv'))}</label><select name="inv_status">${invStatusOptions(t, 'arrived')}</select></div>
-    <div><label>${esc(t('paid'))}</label><select name="paid"><option value="">—</option><option value="1">${esc(t('paid'))}</option><option value="0">${esc(t('unpaid'))}</option></select></div>
+    ${withPaid ? `<div><label>${esc(t('paid'))}</label><select name="paid"><option value="">—</option><option value="1">${esc(t('paid'))}</option><option value="0">${esc(t('unpaid'))}</option></select></div>` : ''}
     <button>${esc(t('apply'))}</button></form>
   <script>document.getElementById('inv-all').addEventListener('change',(e)=>document.querySelectorAll('input[form=bulkinv][name=ids]').forEach((c)=>c.checked=e.target.checked))</script>${PHOTO_JS}`;
 }
@@ -432,6 +441,7 @@ app.post('/invoice/:id/forward', (req, res) => {
 app.get('/invoice/:id', (req, res) => {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.id, 10));
   if (!inv || (!req.session.admin && inv.client_id !== req.session.clientId)) return res.redirect('/cabinet');
+  if (photosOnly(req)) return res.redirect('/admin/photos');
   res.render(`${req.t('invoice')} ${inv.number}`, invoicePage(req, inv));
 });
 
@@ -441,31 +451,46 @@ app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
 
 const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/forward', 'a_forward'], ['/admin/report', 'a_report'], ['/admin/news', 'a_news'], ['/admin/settings', 'a_settings']];
 function adminRender(req, res, title, body) {
-  const role = `<span class="badge" style="margin-left:auto">${esc(req.t(isOwner(req) ? 'role_owner' : isKeeper(req) ? 'role_keeper' : 'role_accountant'))}</span>`;
-  const list = isKeeper(req) ? [['/admin/photos', 'a_scale_photos']] : ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings');
+  const role = `<span class="badge" style="margin-left:auto">${esc(req.session.staffName ? `${req.session.staffName} · ` : '')}${esc(req.t('role_' + req.session.admin))}</span>`;
+  const list = photosOnly(req) ? [['/admin/photos', 'a_scale_photos']] : ADMIN_TABS.filter(([h]) => can(req, 'GET', h.slice(6) || '/'));
   const tabs = list.map(([h, k]) => `<a href="${h}" class="${req.path === h || (h !== '/admin' && req.path.startsWith(h)) ? 'on' : ''}">${esc(req.t(k))}</a>`).join('');
   const flash = req.session.flash; delete req.session.flash;
   res.render(title, `<div class="subnav noprint">${tabs}${role}</div>${flash ? `<div class="alert ok">${esc(flash)}</div>` : ''}${body}`);
 }
 
+const pwHash = (pw, salt = crypto.randomBytes(12).toString('hex')) => `${salt}:${crypto.scryptSync(String(pw), salt, 32).toString('hex')}`;
+const pwOk = (stored, pw) => { const [salt] = String(stored).split(':'); const a = Buffer.from(pwHash(pw, salt)); const b = Buffer.from(String(stored)); return a.length === b.length && crypto.timingSafeEqual(a, b); };
+const sameStr = (x, y) => { const a = Buffer.from(String(x || '')); const b = Buffer.from(y); return a.length === b.length && crypto.timingSafeEqual(a, b); };
+const adminFails = new Map();
 app.post('/admin/login', (req, res) => {
-  const same = (x, y) => { const a = Buffer.from(String(x || '')); const b = Buffer.from(y); return a.length === b.length && crypto.timingSafeEqual(a, b); };
-  if (same(req.body.password, ADMIN_PASSWORD)) req.session.admin = 'owner';
-  else if (same(req.body.password, ACCOUNTANT_PASSWORD)) req.session.admin = 'accountant';
-  else if (same(req.body.password, KEEPER_PASSWORD)) req.session.admin = 'keeper';
-  res.redirect('/admin' + (req.session.admin ? '' : '?err=1'));
+  const ip = req.ip; const now = Date.now(); const f = adminFails.get(ip);
+  if (f && f.until > now && f.n >= 10) return res.redirect('/admin?err=many');
+  const login = String(req.body.login || '').trim().toLowerCase(); const pw = String(req.body.password || '');
+  const u = db.prepare('SELECT * FROM staff WHERE login = ? AND active = 1').get(login);
+  if (login === 'admin' && sameStr(pw, ADMIN_PASSWORD)) Object.assign(req.session, { admin: 'owner', staffId: 0, staffName: '', pwTag: 'env' });
+  else if (u && pwOk(u.pw, pw)) Object.assign(req.session, { admin: u.role, staffId: u.id, staffName: u.name, pwTag: u.pw });
+  else { adminFails.set(ip, { n: (f && f.until > now ? f.n : 0) + 1, until: now + 15 * 60 * 1000 }); return res.redirect('/admin?err=1'); }
+  adminFails.delete(ip);
+  res.redirect('/admin');
 });
 
 app.use('/admin', (req, res, next) => {
   if (req.session.admin === true) req.session.admin = 'owner';
+  // Сотрудника отключили, сменили ему пароль или роль — он сразу выходит.
+  if (req.session.admin && req.session.staffId) {
+    const u = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.session.staffId);
+    if (!u || !u.active || u.pw !== req.session.pwTag || u.role !== req.session.admin) delete req.session.admin;
+  } else if (req.session.admin && req.session.staffId !== 0) delete req.session.admin;
   if (req.session.admin) {
-    if ((req.path.startsWith('/settings') || req.path === '/backup') && !isOwner(req)) return res.redirect('/admin');
-    if (isKeeper(req) && !(req.path === '/photos' || /^\/invoices\/\d+\/photos(\/\d+\/delete)?$/.test(req.path))) return res.redirect('/admin/photos');
-    return next();
+    if (can(req, req.method, req.path)) return next();
+    if (photosOnly(req)) return res.redirect('/admin/photos');
+    req.session.flash = req.t('a_no_access');
+    return res.redirect('/admin');
   }
   res.render(req.t('admin_login'), `<div class="card" style="max-width:380px;margin:0 auto"><h1>${esc(req.t('admin_login'))}</h1>
-    ${req.query.err ? `<div class="alert err">${esc(req.t('login_error'))}</div>` : ''}
-    <form method="post" action="/admin/login"><label>${esc(req.t('password'))}</label><input type="password" name="password" required autofocus><p><button>${esc(req.t('login_btn'))}</button></p></form></div>`);
+    ${req.query.err ? `<div class="alert err">${esc(req.t(req.query.err === 'many' ? 'login_many' : 'a_login_error'))}</div>` : ''}
+    <form method="post" action="/admin/login"><label>${esc(req.t('a_login'))}</label><input name="login" required autofocus autocapitalize="none" autocomplete="username">
+    <label>${esc(req.t('password'))}</label><input type="password" name="password" required autocomplete="current-password"><p><button>${esc(req.t('login_btn'))}</button></p></form></div>`);
 });
 
 app.get('/admin', (req, res) => {
@@ -578,8 +603,8 @@ app.get('/admin/clients/:id', (req, res) => {
   adminRender(req, res, client.code, `<div class="card"><h1>${esc(client.name)}${phone}</h1>
     <div class="code">${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div><div class="muted">${esc(client.city_name || '')} · ${esc(fmtDate(client.created_at))}</div></div>
     <div class="card"><h2>${esc(t('a_parcels'))}</h2>${parcelsTable(req, parcels)}</div>
-    <div class="card"><h2>${esc(t('a_invoices'))}</h2>${invoicesTable(t, invoices, '/admin/invoices/')}
-    <p><a class="btn" href="/admin/invoices/new?code=${encodeURIComponent(client.code)}">${esc(t('a_new_invoice'))}</a></p></div>`);
+    <div class="card"><h2>${esc(t('a_invoices'))}</h2>${invoicesTable(t, invoices, '/admin/invoices/', canMoney(req))}
+    ${canMoney(req) ? `<p><a class="btn" href="/admin/invoices/new?code=${encodeURIComponent(client.code)}">${esc(t('a_new_invoice'))}</a></p>` : ''}</div>`);
 });
 
 function parcelsTable(req, parcels) {
@@ -855,8 +880,8 @@ app.post('/admin/import-invoices', upload.single('file'), (req, res) => {
 app.get('/admin/invoices', (req, res) => {
   const t = req.t;
   const invoices = db.prepare(`SELECT i.*, c.code, c.name, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i JOIN clients c ON c.id = i.client_id ORDER BY i.id DESC LIMIT 300`).all();
-  adminRender(req, res, t('a_invoices'), `<div class="card"><form method="get" action="/admin/invoices/new" class="row"><div><label>${esc(t('a_pick_client'))}</label><input name="code" required placeholder="D1600"></div><button>${esc(t('a_new_invoice'))}</button><a class="btn sec" href="/admin/import#inv">${esc(t('a_inv_import'))}</a></form></div>
-  <div class="card">${invoicesTable(t, invoices, '/admin/invoices/')}</div>`);
+  adminRender(req, res, t('a_invoices'), `${canMoney(req) ? `<div class="card"><form method="get" action="/admin/invoices/new" class="row"><div><label>${esc(t('a_pick_client'))}</label><input name="code" required placeholder="D1600"></div><button>${esc(t('a_new_invoice'))}</button><a class="btn sec" href="/admin/import#inv">${esc(t('a_inv_import'))}</a></form></div>` : ''}
+  <div class="card">${invoicesTable(t, invoices, '/admin/invoices/', canMoney(req))}</div>`);
 });
 
 // Номер накладной: D{код}-{ММДД даты отправки}-{мест}, например D1601-1030-4.
@@ -959,9 +984,9 @@ app.get('/admin/invoices/:id', (req, res) => {
   if (!inv) return res.redirect('/admin/invoices');
   const t = req.t;
   adminRender(req, res, inv.number, `${invoicePage(req, inv)}<div class="row noprint" style="gap:8px">
-    <form method="post" action="/admin/invoices/${inv.id}/paid" style="flex:0 0 auto"><input type="hidden" name="paid" value="${inv.paid ? 0 : 1}"><button class="sec">${esc(inv.paid ? t('unpaid') : t('a_mark_paid'))}</button></form>
-    <a class="btn sec" style="flex:0 0 auto" href="/admin/invoices/${inv.id}/edit">${esc(t('edit'))}</a>
-    <form method="post" action="/admin/invoices/${inv.id}/delete" style="flex:0 0 auto" onsubmit="return confirm('${esc(t('confirm_delete'))}')"><button class="sec">${esc(t('delete'))}</button></form></div>`);
+    ${canMoney(req) ? `<form method="post" action="/admin/invoices/${inv.id}/paid" style="flex:0 0 auto"><input type="hidden" name="paid" value="${inv.paid ? 0 : 1}"><button class="sec">${esc(inv.paid ? t('unpaid') : t('a_mark_paid'))}</button></form>
+    <a class="btn sec" style="flex:0 0 auto" href="/admin/invoices/${inv.id}/edit">${esc(t('edit'))}</a>` : ''}
+    ${isOwner(req) ? `<form method="post" action="/admin/invoices/${inv.id}/delete" style="flex:0 0 auto" onsubmit="return confirm('${esc(t('confirm_delete'))}')"><button class="sec">${esc(t('delete'))}</button></form>` : ''}</div>`);
 });
 
 app.get('/admin/invoices/:id/edit', (req, res) => {
@@ -973,7 +998,7 @@ app.get('/admin/invoices/:id/edit', (req, res) => {
 app.post('/admin/invoices/bulk', (req, res) => {
   const ids = [].concat(req.body.ids || []).map((x) => parseInt(x, 10)).filter(Boolean);
   const st = INV_STATUSES.includes(req.body.inv_status) ? req.body.inv_status : null;
-  const paid = req.body.paid === '1' ? 1 : req.body.paid === '0' ? 0 : null;
+  const paid = !canMoney(req) ? null : req.body.paid === '1' ? 1 : req.body.paid === '0' ? 0 : null;
   db.exec('BEGIN');
   for (const id of ids) db.prepare('UPDATE invoices SET inv_status = COALESCE(?, inv_status), paid = COALESCE(?, paid) WHERE id = ?').run(st, paid, id);
   db.exec('COMMIT');
@@ -1067,7 +1092,7 @@ app.get('/admin/forward', (req, res) => {
   adminRender(req, res, t('a_forward'), `<div class="card"><p class="muted" style="margin:0">${esc(t('a_forward_hint'))}</p></div>
   <div class="card tbl">${rows.length ? `<table><tr><th>${esc(t('date'))}</th><th>${esc(t('invoice'))}</th><th>${esc(t('fwd_city'))}</th><th>${esc(t('fwd_method'))}</th><th>${esc(t('fwd_receiver'))}</th><th>${esc(t('note'))}</th><th></th></tr>
   ${rows.map((r) => `<tr${r.status === 'done' ? ' style="opacity:.55"' : ''}><td>${esc(fmtDay(r.created_at))}</td><td><a href="/admin/invoices/${r.invoice_id}"><b>${esc(r.number)}</b></a><div class="muted" style="font-size:13px">${esc(dispCode(r.code))} ${esc(r.name)}</div></td>
-    <td><b>${esc(r.city)}</b></td><td>${esc(t('fwd_m_' + r.method))}</td><td>${esc(r.receiver)}${r.receiver_phone ? `<div>${esc(r.receiver_phone)}</div>` : ''}</td><td>${esc(r.note)}</td>
+    <td><b>${esc(r.city)}</b></td><td>${esc(t('fwd_m_' + r.method))}</td><td>${esc(r.receiver)}${r.receiver_phone && isOwner(req) ? `<div>${esc(r.receiver_phone)}</div>` : ''}</td><td>${esc(r.note)}</td>
     <td><form method="post" action="/admin/forward/${r.id}" style="margin:0"><input type="hidden" name="status" value="${r.status === 'done' ? 'new' : 'done'}"><button class="sec sm">${esc(t(r.status === 'done' ? 'fwd_reopen' : 'fwd_mark_done'))}</button></form></td></tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_forward_empty'))}</p>`}</div>`);
 });
 app.post('/admin/forward/:id', (req, res) => {
@@ -1173,8 +1198,36 @@ app.get('/admin/settings', (req, res) => {
     <div><label>${esc(t('s_currency'))}</label><input name="currency" value="${esc(setting('currency'))}"></div>
     <div><label>${esc(t('s_code_start'))}</label><input name="code_start" value="${esc(setting('code_start'))}"></div>
     <div><label>WhatsApp</label><input name="whatsapp" value="${esc(setting('whatsapp'))}"></div></div>
-    <p class="muted">${esc(t('a_password_note'))}</p></div>
-    <p><button>${esc(t('save'))}</button></p></form>`);
+    </div>
+    <p><button>${esc(t('save'))}</button></p></form>
+    <div class="card" id="staff"><h2>🔑 ${esc(t('s_staff'))}</h2><p class="muted">${esc(t('s_staff_hint'))}</p>
+    <div class="tbl"><table><tr><th>${esc(t('name'))}</th><th>${esc(t('a_login'))}</th><th>${esc(t('s_role'))}</th><th>${esc(t('s_new_password'))}</th><th></th></tr>
+    ${db.prepare('SELECT * FROM staff ORDER BY active DESC, role, name').all().map((u) => `<tr${u.active ? '' : ' style="opacity:.5"'}><td><b>${esc(u.name)}</b></td><td>${esc(u.login)}</td><td>${esc(t('role_' + u.role))}</td>
+      <td><form method="post" action="/admin/settings/staff/${u.id}" class="row" style="margin:0;gap:6px"><input name="pw" type="text" minlength="6" autocomplete="off" placeholder="${esc(t('s_pw_keep'))}"><button class="sec sm" name="act" value="pw">${esc(t('save'))}</button></form></td>
+      <td><form method="post" action="/admin/settings/staff/${u.id}" style="margin:0"><button class="sec sm" name="act" value="${u.active ? 'off' : 'on'}">${esc(t(u.active ? 's_staff_off' : 's_staff_on'))}</button></form></td></tr>`).join('')}</table></div>
+    <h3>${esc(t('s_staff_add'))}</h3>
+    <form method="post" action="/admin/settings/staff"><div class="row"><div><label>${esc(t('name'))}</label><input name="name" required maxlength="60" placeholder="Айгерим"></div>
+      <div><label>${esc(t('a_login'))}</label><input name="login" required maxlength="30" pattern="[a-zA-Z0-9._-]{3,30}" autocapitalize="none" placeholder="aigerim"></div></div>
+      <div class="row"><div><label>${esc(t('s_role'))}</label><select name="role">${ROLES.filter((r) => r !== 'owner').map((r) => `<option value="${r}">${esc(t('role_' + r))}</option>`).join('')}</select></div>
+      <div><label>${esc(t('password'))}</label><input name="pw" required minlength="6" type="text" autocomplete="off"></div></div>
+      <p><button>${esc(t('s_staff_add'))}</button></p></form>
+    <div class="hint">${ROLES.map((r) => `<div><b>${esc(t('role_' + r))}:</b> ${esc(t('access_' + r))}</div>`).join('')}</div></div>`);
+});
+
+app.post('/admin/settings/staff', (req, res) => {
+  const b = req.body; const login = String(b.login || '').trim().toLowerCase(); const pw = String(b.pw || '');
+  const ok = /^[a-z0-9._-]{3,30}$/.test(login) && login !== 'admin' && pw.length >= 6 && String(b.name || '').trim() && ROLES.includes(b.role) && b.role !== 'owner';
+  if (!ok) req.session.flash = req.t('s_staff_bad');
+  else if (db.prepare('SELECT 1 FROM staff WHERE login = ?').get(login)) req.session.flash = req.t('s_staff_dup');
+  else { db.prepare('INSERT INTO staff (name, login, role, pw) VALUES (?, ?, ?, ?)').run(String(b.name).trim().slice(0, 60), login, b.role, pwHash(pw)); req.session.flash = `${req.t('s_staff_added')}: ${login}`; }
+  res.redirect('/admin/settings#staff');
+});
+app.post('/admin/settings/staff/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10); const act = req.body.act;
+  if (act === 'pw' && String(req.body.pw || '').length >= 6) { db.prepare('UPDATE staff SET pw = ? WHERE id = ?').run(pwHash(req.body.pw), id); req.session.flash = req.t('s_pw_changed'); }
+  else if (act === 'off' || act === 'on') db.prepare('UPDATE staff SET active = ? WHERE id = ?').run(act === 'on' ? 1 : 0, id);
+  else req.session.flash = req.t('s_pw_none');
+  res.redirect('/admin/settings#staff');
 });
 
 app.post('/admin/settings', (req, res) => {
@@ -1195,4 +1248,4 @@ app.post('/admin/settings', (req, res) => {
   res.redirect('/admin/settings');
 });
 
-app.listen(PORT, () => console.log(`Cargo 151: http://localhost:${PORT}  (owner: ${process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD' : 'admin151'}, accountant: ${process.env.ACCOUNTANT_PASSWORD ? 'ACCOUNTANT_PASSWORD' : 'buh151'}, keeper: ${process.env.KEEPER_PASSWORD ? 'KEEPER_PASSWORD' : 'sklad151'})`));
+app.listen(PORT, () => console.log(`Cargo 151: http://localhost:${PORT}  (admin / ${process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD' : 'admin151'})`));
