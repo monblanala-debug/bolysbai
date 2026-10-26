@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Установка сайта Карго 151 на чистый сервер Ubuntu 22.04/24.04.
-# Запуск от root:  bash install.sh <git-url-репозитория> [домен]
-# Пример:          bash install.sh https://github.com/user/cargo151.git cargo.cargo151.com
+# Запуск от root:  bash install.sh [git-url-репозитория] [домен]
+# Без аргументов ставит наш репозиторий на cargo151.ru — команду можно набрать в веб-консоли PS.kz:
+#   curl -sL https://raw.githubusercontent.com/monblanala-debug/bolysbai/main/deploy/install.sh | bash
 set -euo pipefail
 
-REPO_URL="${1:?Укажите адрес репозитория}"
-DOMAIN="${2:-}"
+REPO_URL="${1:-https://github.com/monblanala-debug/bolysbai.git}"
+DOMAIN="${2-cargo151.ru}"
 APP_DIR=/opt/cargo151
 DATA_DIR=/var/lib/cargo151
 ENV_FILE=/etc/cargo151.env
