@@ -123,9 +123,13 @@ app.get('/info', (req, res) => {
     <h2>${esc(t('hours'))}</h2><ul>${whs.map((w) => `<li><b>${esc(whName(req.lang, w))}</b> — ${esc(req.lang === 'zh' ? w.hours_zh : w.hours_ru)}</li>`).join('')}</ul>
     ${renderInfo(setting(req.lang === 'zh' ? 'info_zh' : 'info_ru'))}</div></div>`);
 });
-for (const [path, key] of [['/about', 'about'], ['/services', 'services']]) {
+for (const [path, key] of [['/about', 'about'], ['/services', 'services'], ['/insurance', 'insurance']]) {
   app.get(path, (req, res) => {
-    res.render(req.t('nav_' + key), `<div class="narrow fade">${renderInfoCards(setting(`${key}_${req.lang === 'zh' ? 'zh' : 'ru'}`))}</div>`);
+    const wa = setting('whatsapp');
+    // С «Услуг» ведём на страховку, со страховки — сразу в WhatsApp.
+    const more = key === 'services' ? `<a class="btn sec" href="/insurance">🛡 ${esc(req.t('nav_insurance'))} →</a>`
+      : key === 'insurance' && wa ? `<a class="btn" href="https://wa.me/${esc(wa)}?text=${encodeURIComponent(req.t('ins_wa_msg'))}" target="_blank" rel="noopener">${esc(req.t('write_wa'))}</a>` : '';
+    res.render(req.t('nav_' + key), `<div class="narrow fade">${renderInfoCards(setting(`${key}_${req.lang === 'zh' ? 'zh' : 'ru'}`))}${more ? `<p>${more}</p>` : ''}</div>`);
   });
 }
 
@@ -391,14 +395,39 @@ function invoicePage(req, inv) {
   ${photos.length || req.session.admin ? `<div class="card"><h2 style="margin-top:0">${esc(t('inv_photos'))}</h2>
     ${photos.length ? `<div class="photos">${photos.map((f) => `<div style="position:relative"><a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a>${req.session.admin ? `<form method="post" action="/admin/invoices/${inv.id}/photos/${f.id}/delete" class="noprint" style="position:absolute;top:4px;right:4px;margin:0" onsubmit="return confirm('${esc(t('confirm_delete_photo'))}')"><button class="sec sm" style="padding:2px 8px">✕</button></form>` : ''}</div>`).join('')}</div>` : `<p class="muted">${esc(t('inv_no_photos'))}</p>`}
     ${req.session.admin ? photoForm(t, inv.id, `/admin/invoices/${inv.id}`) + PHOTO_JS : ''}</div>` : ''}
+  ${forwardCard(req, inv)}
   <div class="wb wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
       ${rules.map((l, i) => (i === 0 && !/^\d/.test(l) ? `<p><b>${esc(l)}</b></p>` : `<p>${esc(l)}</p>`)).join('')}</div>
-  <p class="muted" style="font-size:13px">${esc(t('inv_rules_agree'))}</p>
+  <p class="muted" style="font-size:13px">${esc(t('inv_rules_agree'))} <a href="/insurance">🛡 ${esc(t('nav_insurance'))}</a></p>
   <style>@page{size:A4 landscape;margin:10mm}</style>
   <script>// Накладная всегда как бумажный лист в альбомной ориентации: на узком экране уменьшаем её целиком.
   (function(){const fit=()=>document.querySelectorAll('.wb-fit').forEach((w)=>{const s=w.firstElementChild;s.style.transform='';const k=Math.min(1,w.clientWidth/s.offsetWidth);s.style.transform='scale('+k+')';w.style.height=s.offsetHeight*k+'px'});
   fit();addEventListener('resize',fit);addEventListener('load',fit);addEventListener('beforeprint',fit);addEventListener('afterprint',fit)})();</script>`;
 }
+
+// Отправка дальше по Казахстану: клиент оставляет заявку прямо из накладной, менеджер видит её в «Заявках».
+const FWD_METHODS = ['truck', 'tk', 'any'];
+function forwardCard(req, inv) {
+  const t = req.t;
+  const reqs = db.prepare('SELECT * FROM forward_requests WHERE invoice_id = ? ORDER BY id DESC').all(inv.id);
+  const list = reqs.map((r) => `<div class="news-i"><b>${esc(r.city)}</b> · ${esc(t('fwd_m_' + r.method))} · ${esc(fmtDay(r.created_at))}
+    <span class="badge ${r.status === 'done' ? 'b-arrived' : 'b-transit'}">${esc(t(r.status === 'done' ? 'fwd_done' : 'fwd_new'))}</span></div>`).join('');
+  if (req.session.admin) return reqs.length ? `<div class="card noprint"><h2 style="margin-top:0">🚚 ${esc(t('fwd_title'))}</h2>${list}<p><a href="/admin/forward">${esc(t('a_forward'))} →</a></p></div>` : '';
+  if (reqs.some((r) => r.status === 'new')) return `<div class="card noprint"><h2 style="margin-top:0">🚚 ${esc(t('fwd_title'))}</h2>${list}</div>`;
+  return `<details class="card noprint"${reqs.length ? '' : ''}><summary><b>🚚 ${esc(t('fwd_title'))}</b> <span class="muted">${esc(t('fwd_hint'))}</span></summary>${list}
+    <form method="post" action="/invoice/${inv.id}/forward"><div class="row"><div><label>${esc(t('fwd_city'))}</label><input name="city" required maxlength="80" placeholder="${esc(t('fwd_city_ph'))}"></div>
+    <div><label>${esc(t('fwd_method'))}</label><select name="method">${FWD_METHODS.map((m) => `<option value="${m}">${esc(t('fwd_m_' + m))}</option>`).join('')}</select></div></div>
+    <div class="row"><div><label>${esc(t('fwd_receiver'))}</label><input name="receiver" maxlength="80"></div><div><label>${esc(t('fwd_phone'))}</label><input name="receiver_phone" type="tel" maxlength="30"></div></div>
+    <label>${esc(t('note'))}</label><input name="note" maxlength="300"><p><button>${esc(t('fwd_send'))}</button></p></form></details>`;
+}
+app.post('/invoice/:id/forward', (req, res) => {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.id, 10));
+  if (!inv || inv.client_id !== req.session.clientId) return res.redirect('/cabinet');
+  const b = req.body; const city = String(b.city || '').trim().slice(0, 80);
+  if (city) db.prepare('INSERT INTO forward_requests (invoice_id, client_id, city, method, receiver, receiver_phone, note) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(inv.id, inv.client_id, city, FWD_METHODS.includes(b.method) ? b.method : 'any', String(b.receiver || '').trim().slice(0, 80), String(b.receiver_phone || '').trim().slice(0, 30), String(b.note || '').trim().slice(0, 300));
+  res.redirect(`/invoice/${inv.id}`);
+});
 
 app.get('/invoice/:id', (req, res) => {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.id, 10));
@@ -410,7 +439,7 @@ app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
 
 // ---------- Админка ----------
 
-const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/report', 'a_report'], ['/admin/news', 'a_news'], ['/admin/settings', 'a_settings']];
+const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/forward', 'a_forward'], ['/admin/report', 'a_report'], ['/admin/news', 'a_news'], ['/admin/settings', 'a_settings']];
 function adminRender(req, res, title, body) {
   const role = `<span class="badge" style="margin-left:auto">${esc(req.t(isOwner(req) ? 'role_owner' : isKeeper(req) ? 'role_keeper' : 'role_accountant'))}</span>`;
   const list = isKeeper(req) ? [['/admin/photos', 'a_scale_photos']] : ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings');
@@ -1030,6 +1059,22 @@ app.post('/admin/news/:id/delete', (req, res) => {
   res.redirect('/admin/news');
 });
 
+// ---------- Заявки на отправку дальше ----------
+app.get('/admin/forward', (req, res) => {
+  const t = req.t;
+  const rows = db.prepare(`SELECT f.*, i.number, c.code, c.name FROM forward_requests f JOIN invoices i ON i.id = f.invoice_id JOIN clients c ON c.id = f.client_id
+    ORDER BY f.status = 'done', f.id DESC LIMIT 200`).all();
+  adminRender(req, res, t('a_forward'), `<div class="card"><p class="muted" style="margin:0">${esc(t('a_forward_hint'))}</p></div>
+  <div class="card tbl">${rows.length ? `<table><tr><th>${esc(t('date'))}</th><th>${esc(t('invoice'))}</th><th>${esc(t('fwd_city'))}</th><th>${esc(t('fwd_method'))}</th><th>${esc(t('fwd_receiver'))}</th><th>${esc(t('note'))}</th><th></th></tr>
+  ${rows.map((r) => `<tr${r.status === 'done' ? ' style="opacity:.55"' : ''}><td>${esc(fmtDay(r.created_at))}</td><td><a href="/admin/invoices/${r.invoice_id}"><b>${esc(r.number)}</b></a><div class="muted" style="font-size:13px">${esc(dispCode(r.code))} ${esc(r.name)}</div></td>
+    <td><b>${esc(r.city)}</b></td><td>${esc(t('fwd_m_' + r.method))}</td><td>${esc(r.receiver)}${r.receiver_phone ? `<div>${esc(r.receiver_phone)}</div>` : ''}</td><td>${esc(r.note)}</td>
+    <td><form method="post" action="/admin/forward/${r.id}" style="margin:0"><input type="hidden" name="status" value="${r.status === 'done' ? 'new' : 'done'}"><button class="sec sm">${esc(t(r.status === 'done' ? 'fwd_reopen' : 'fwd_mark_done'))}</button></form></td></tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_forward_empty'))}</p>`}</div>`);
+});
+app.post('/admin/forward/:id', (req, res) => {
+  db.prepare('UPDATE forward_requests SET status = ? WHERE id = ?').run(req.body.status === 'done' ? 'done' : 'new', parseInt(req.params.id, 10));
+  res.redirect('/admin/forward');
+});
+
 // ---------- Отчёт за месяц ----------
 function reportData(month) {
   const inv = db.prepare(`SELECT i.*, c.code, c.name FROM invoices i JOIN clients c ON c.id = i.client_id
@@ -1041,13 +1086,16 @@ function reportData(month) {
   for (const i of inv) { const d = (DEST_RU[i.destination] || i.destination || '—'); const o = byDest[d] ||= { count: 0, weight: 0, volume: 0, amount: 0 }; o.count++; o.weight += i.total_weight || 0; o.volume += i.volume || 0; o.amount += i.amount || 0; }
   // Долги — по всем месяцам, а не только по выбранному.
   const debts = db.prepare(`SELECT c.code, c.name, COUNT(*) n, SUM(i.amount) s FROM invoices i JOIN clients c ON c.id = i.client_id WHERE i.paid = 0 GROUP BY c.id ORDER BY s DESC`).all();
-  return { inv, tot, byDest, debts };
+  // «Пропавшие»: возили хотя бы 3 раза, но последней накладной больше 60 дней.
+  const lost = db.prepare(`SELECT c.id, c.code, c.name, c.phone, COUNT(*) n, SUM(i.amount) s, MAX(COALESCE(NULLIF(i.inv_date, ''), substr(i.created_at, 1, 10))) last
+    FROM invoices i JOIN clients c ON c.id = i.client_id GROUP BY c.id HAVING n >= 3 AND last < date('now', '-60 days') ORDER BY s DESC LIMIT 100`).all();
+  return { inv, tot, byDest, debts, lost };
 }
 const r2 = (v) => Math.round(v * 100) / 100;
 app.get('/admin/report', (req, res) => {
   const t = req.t;
   const month = /^\d{4}-\d{2}$/.test(String(req.query.m || '')) ? req.query.m : new Date().toISOString().slice(0, 7);
-  const { tot, byDest, debts } = reportData(month);
+  const { tot, byDest, debts, lost } = reportData(month);
   const card = (k, v) => `<div class="card"><div class="muted">${esc(t(k))}</div><div class="stat">${v}</div></div>`;
   adminRender(req, res, t('a_report'), `<div class="card"><form class="row" style="align-items:flex-end"><div><label>${esc(t('a_month'))}</label><input type="month" name="m" value="${month}"></div><button>${esc(t('a_show'))}</button>
     <a class="btn sec" href="/admin/report.xlsx?m=${month}">⬇ Excel</a></form></div>
@@ -1056,7 +1104,9 @@ app.get('/admin/report', (req, res) => {
     <div class="card tbl"><h2>${esc(t('a_rep_by_dest'))}</h2><table><tr><th>${esc(t('a_rep_dest'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('a_rep_volume'))}</th><th>${esc(t('a_rep_amount'))}</th></tr>
     ${Object.entries(byDest).map(([d, o]) => `<tr><td>${esc(d)}</td><td>${o.count}</td><td>${num(r2(o.weight))}</td><td>${num(o.volume)}</td><td>${money(o.amount)}</td></tr>`).join('')}</table></div>
     <div class="card tbl"><h2>${esc(t('a_rep_debts'))}</h2>${debts.length ? `<table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_rep_unpaid'))}</th></tr>
-    ${debts.map((d) => `<tr><td><b>${esc(dispCode(d.code))}</b></td><td>${esc(d.name)}</td><td>${d.n}</td><td>${money(d.s)}</td></tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_rep_no_debts'))}</p>`}</div>`);
+    ${debts.map((d) => `<tr><td><b>${esc(dispCode(d.code))}</b></td><td>${esc(d.name)}</td><td>${d.n}</td><td>${money(d.s)}</td></tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_rep_no_debts'))}</p>`}</div>
+    <div class="card tbl" id="lost"><h2>${esc(t('a_lost'))}</h2><p class="muted">${esc(t('a_lost_hint'))}</p>${lost.length ? `<table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_rep_amount'))}</th><th>${esc(t('a_lost_last'))}</th>${isOwner(req) ? '<th></th>' : ''}</tr>
+    ${lost.map((d) => `<tr><td><a href="/admin/clients/${d.id}"><b>${esc(dispCode(d.code))}</b></a></td><td>${esc(d.name)}</td><td>${d.n}</td><td>${money(d.s)}</td><td>${esc(fmtDay(d.last))}</td>${isOwner(req) ? `<td>${isStub(d) ? '' : `<a class="btn sec sm" href="https://wa.me/${esc(d.phone)}" target="_blank" rel="noopener">WhatsApp</a>`}</td>` : ''}</tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_lost_none'))}</p>`}</div>`);
 });
 app.get('/admin/report.xlsx', (req, res) => {
   const t = req.t;
@@ -1106,7 +1156,7 @@ app.get('/admin/settings', (req, res) => {
     <div class="card"><h2>💾 ${esc(t('a_backup'))}</h2><p class="muted">${esc(t('a_backup_hint'))}</p><a class="btn sec" href="/admin/backup">⬇ ${esc(t('a_backup'))}</a></div>
     <div class="card"><h2>${esc(t('s_notice'))}</h2>
       <label>рус</label><input name="notice_ru" value="${esc(setting('notice_ru'))}"><label>中文</label><input name="notice_zh" value="${esc(setting('notice_zh'))}"></div>
-    ${['services', 'about'].map((k) => `<div class="card"><h2>${esc(t('nav_' + k))}</h2><p class="muted">${esc(t('s_info_hint'))}</p>
+    ${['services', 'insurance', 'about'].map((k) => `<div class="card"><h2>${esc(t('nav_' + k))}</h2><p class="muted">${esc(t('s_info_hint'))}</p>
       <label>рус</label><textarea name="${k}_ru" style="min-height:220px">${esc(setting(k + '_ru'))}</textarea>
       <label>中文</label><textarea name="${k}_zh" style="min-height:220px">${esc(setting(k + '_zh'))}</textarea></div>`).join('')}
     <div class="card"><h2>${esc(t('nav_info'))}</h2><p class="muted">${esc(t('s_info_hint'))}</p>
@@ -1139,7 +1189,7 @@ app.post('/admin/settings', (req, res) => {
     db.prepare(`INSERT INTO warehouses (${f.join(', ')}) VALUES (${f.map(() => '?').join(', ')})`).run(...f.map((k) => String(b[`wh_new_${k}`] || '').trim()));
   }
   for (const c of db.prepare('SELECT id FROM cities').all()) db.prepare('UPDATE cities SET pickup_address = ? WHERE id = ?').run(String(b[`city_${c.id}`] ?? '').trim(), c.id);
-  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'invoice_company', 'invoice_title', 'invoice_rules', 'promo_title_ru', 'promo_title_zh', 'promo_text_ru', 'promo_text_zh']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
+  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'insurance_ru', 'insurance_zh', 'invoice_company', 'invoice_title', 'invoice_rules', 'promo_title_ru', 'promo_title_zh', 'promo_text_ru', 'promo_text_zh']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
   db.exec('COMMIT');
   req.session.flash = req.t('saved');
   res.redirect('/admin/settings');

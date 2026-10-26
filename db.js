@@ -77,6 +77,18 @@ CREATE TABLE IF NOT EXISTS news (
   text_kk TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS forward_requests (
+  id INTEGER PRIMARY KEY,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  city TEXT NOT NULL,
+  method TEXT DEFAULT '',
+  receiver TEXT DEFAULT '',
+  receiver_phone TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  status TEXT DEFAULT 'new',
+  created_at TEXT DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS parcel_photos (
   id INTEGER PRIMARY KEY,
   parcel_id INTEGER NOT NULL REFERENCES parcels(id),
@@ -238,6 +250,43 @@ seed();
   def.run('promo_text_ru', 'Оплатим заказ на 1688, Taobao, Pinduoduo, пополним Alipay и WeChat в юанях. Напишите — поможем.');
   def.run('promo_title_zh', '无法付款给供应商？');
   def.run('promo_text_zh', '我们帮您支付 1688、淘宝、拼多多订单，充值支付宝和微信人民币。');
+  // Страница «Страховка» — по пунктам 4–7 правил накладной; меняется в настройках.
+  def.run('insurance_ru', `# Страхование груза
+Страховка защищает от полной утери груза в пути. Оформляется до отправки: сообщите менеджеру стоимость товара.
+
+# Когда страховка нужна
+- Если стоимость товара больше 5 $ за кг в коробке — страхование обязательно.
+- Без страховки компенсация за утерю, конфискацию или изъятие такого груза не выплачивается.
+- Сообщить стоимость и решить, страховать ли груз, — ответственность клиента.
+
+# Что получите при утере
+- Застрахованный груз — по страховой сумме, которую вы указали.
+- Незастрахованный груз (стоимостью до 5 $/кг) — 3 $/кг по ЖД и 5 $/кг для авто.
+
+# Что страховка не покрывает
+- Повреждения, дефекты и недостачу — только полную утерю.
+- Повреждения при досмотре таможней.
+
+# Сколько стоит
+Процент страховки зависит от товара. Напишите нам в WhatsApp до отправки — посчитаем.`);
+  def.run('insurance_zh', `# 货物保险
+保险保障运输途中货物全部丢失。请在发货前向客服告知货值。
+
+# 何时需要保险
+- 每箱货值超过 5 美元/公斤时必须投保。
+- 未告知货值且未投保的，丢失、没收或扣押不予赔偿。
+- 告知货值和决定是否投保由客户负责。
+
+# 丢失如何赔偿
+- 已投保：按申报的保险金额赔偿。
+- 未投保（货值 5 美元/公斤以内）：铁路 3 美元/公斤，汽运 5 美元/公斤。
+
+# 不在保障范围
+- 损坏、瑕疵、短少 — 仅保障全部丢失。
+- 海关查验造成的损坏。
+
+# 费用
+保险费率视货物而定，请发货前通过 WhatsApp 咨询。`);
   def.run('invoice_company', '义乌市坦达供应链管理有限公司');
   def.run('invoice_title', '151库 Cargo');
   def.run('invoice_rules', `ПРАВИЛА ОТПРАВКИ ГРУЗОВ ИЗ КИТАЯ
