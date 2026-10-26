@@ -36,7 +36,7 @@ ADMIN_PASSWORD=ваш_пароль SESSION_SECRET=длинная_случайн�
 1. Направьте домен (например, `cargo.cargo151.com`) A-записью на IP сервера.
 2. Зайдите на сервер под root и выполните одну команду:
 ```
-curl -fsSL https://raw.githubusercontent.com/<владелец>/<репозиторий>/main/deploy/install.sh | bash -s https://github.com/<владелец>/<репозиторий>.git cargo.cargo151.com
+curl -fsSL https://raw.githubusercontent.com/monblanala-debug/bolysbai/main/deploy/install.sh | bash -s https://github.com/monblanala-debug/bolysbai.git cargo.cargo151.com
 ```
 Скрипт установит Node.js и nginx, запустит сайт как службу, подключит HTTPS и в конце покажет пароль админки.
 Обновление сайта: та же команда ещё раз (данные и пароль сохраняются). База лежит в `/var/lib/cargo151/cargo151.db`.
