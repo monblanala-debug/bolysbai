@@ -19,6 +19,11 @@ const dispCode = (code) => (/^\d/.test(code) ? `D${code}` : code);
 const app = express();
 app.set('trust proxy', 1);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// Фото посылок лежат рядом с базой (на сервере /var/lib/cargo151/photos), имена случайные.
+const fs = require('fs');
+const PHOTO_DIR = process.env.PHOTO_DIR || require('path').join(require('path').dirname(process.env.DB_PATH || require('path').join(__dirname, 'cargo151.db')), 'photos');
+fs.mkdirSync(PHOTO_DIR, { recursive: true });
+const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 app.use(express.static(require('path').join(__dirname, 'public'), { maxAge: '7d' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
@@ -221,6 +226,7 @@ app.get('/track', (req, res) => {
       return `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(p.track)}</b><div style="flex:0 0 auto">${statusBadge(t, p.status)}</div></div>
         ${statusLine(t, p.status)}
         <div class="muted">${esc(t('weight'))}: ${p.weight || '—'} · ${esc(t('places'))}: ${p.places || '—'}${p.description ? ' · ' + esc(p.description) : ''}</div>
+        ${p.photo_token ? `<p style="margin:8px 0 0"><a href="/p/${esc(p.photo_token)}">📷 ${esc(t('photo'))}</a></p>` : ''}
         <details class="hist"><summary>${esc(t('history'))}</summary>${parcelHistory(t, p.id)}</details></div>`;
     }).join('')}</div>`;
   }
@@ -228,6 +234,28 @@ app.get('/track', (req, res) => {
     <form method="get"><textarea name="q" placeholder="${esc(t('track_placeholder'))}">${esc(tracks.join('\n'))}</textarea>
     <p><button>${esc(t('track_btn'))}</button></p></form>
     <p class="muted" style="font-size:13px">151.likerj.com: <a href="${LEGACY_TRACK_URL}" target="_blank" rel="noopener">运踪查询</a> · <a href="${LEGACY_TRACK_URL}/ZXYZ.php" target="_blank" rel="noopener">运踪列表查询</a></p></div>${results}`);
+});
+
+// ---------- Фото посылки по ссылке из WhatsApp (без входа) ----------
+
+const parcelPhotos = (id) => db.prepare('SELECT * FROM parcel_photos WHERE parcel_id = ? ORDER BY id').all(id);
+const photoGrid = (photos) => `<div class="photos">${photos.map((f) => `<a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a>`).join('')}</div>`;
+
+app.get('/photo/:file', (req, res) => {
+  const f = String(req.params.file);
+  if (!/^[a-f0-9-]{36}\.jpg$/.test(f) || !db.prepare('SELECT 1 FROM parcel_photos WHERE file = ?').get(f)) return res.sendStatus(404);
+  res.sendFile(require('path').join(PHOTO_DIR, f), { maxAge: '30d' });
+});
+
+app.get('/p/:token', (req, res) => {
+  const t = req.t;
+  const p = db.prepare('SELECT * FROM parcels WHERE photo_token = ?').get(String(req.params.token));
+  if (!p) return res.status(404).render('404', `<div class="card"><p>${esc(t('track_none'))}</p></div>`);
+  const w = p.warehouse_id ? db.prepare('SELECT * FROM warehouses WHERE id = ?').get(p.warehouse_id) : null;
+  res.render(`${t('a_receive_title')} ${p.client_code || ''}`, `<div class="card"><div class="row" style="align-items:center"><h1 style="margin:0">${esc(p.client_code ? dispCode(p.client_code) : '')}</h1><div style="flex:0 0 auto">${statusBadge(t, p.status)}</div></div>
+    <p class="muted">${w ? `${esc(t('warehouse'))}: ${esc(whName(req.lang, w))} · ` : ''}${esc(fmtDate(p.created_at))} · ${esc(t('places'))}: ${p.places || '—'}${p.weight ? ` · ${esc(t('weight'))}: ${p.weight}` : ''}${p.description ? ` · ${esc(p.description)}` : ''}</p>
+    ${photoGrid(parcelPhotos(p.id))}
+    <p><a class="btn sec" href="/cabinet">${esc(t('nav_cabinet'))}</a></p></div>`);
 });
 
 // ---------- Личный кабинет ----------
@@ -254,8 +282,9 @@ app.get('/cabinet', (req, res) => {
   const parcels = db.prepare('SELECT * FROM parcels WHERE client_id = ? ORDER BY updated_at DESC').all(client.id);
   const invoices = db.prepare('SELECT * FROM invoices WHERE client_id = ? ORDER BY id DESC').all(client.id);
   const w = activeWarehouses()[0];
-  const pRows = parcels.length ? `<div class="tbl"><table><tr><th>${esc(t('track'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('date'))}</th></tr>
-    ${parcels.map((p) => `<tr><td><a href="/track?q=${encodeURIComponent(p.track)}">${esc(p.track)}</a></td><td>${statusBadge(t, p.status)}${statusLine(t, p.status, true)}</td><td>${p.weight || ''}</td><td>${p.places || ''}</td><td>${esc(p.description)}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}</table></div>`
+  const pRows = parcels.length ? `<div class="tbl"><table><tr><th>${esc(t('track'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('photo'))}</th><th>${esc(t('date'))}</th></tr>
+    ${parcels.map((p) => `<tr><td><a href="/track?q=${encodeURIComponent(p.track)}">${esc(p.track)}</a></td><td>${statusBadge(t, p.status)}${statusLine(t, p.status, true)}</td><td>${p.weight || ''}</td><td>${p.places || ''}</td><td>${esc(p.description)}</td>
+    <td>${p.photo_token ? `<a href="/p/${esc(p.photo_token)}">📷 ${esc(t('look'))}</a>` : ''}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}</table></div>`
     : `<p class="muted">${esc(t('no_parcels'))}</p>`;
   res.render(t('nav_cabinet'), `<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
     <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
@@ -283,8 +312,8 @@ const cargoStatus = (t, s) => String(s || '').trim().replace(/^(\d{1,2})\.(\d{1,
 const CITY_ZH = { Алматы: '阿拉木图', Москва: '莫斯科', Бишкек: '比什凯克' };
 const INV_HEAD = [
   ['origin', '始发地', 'Пункт вылета'], ['destination', '目的地', 'Пункт назначения'], ['transport', '运输方式', 'Способ перевозки'],
-  ['number', '货号', 'Код груза'], ['delivery_time', '运输时间', 'Время доставки'], ['inv_date', '发货日期', 'Дата отправки'],
-  ['sender', '发货人', 'Грузоотправитель'], ['consignee', '提货联系电话', 'Грузополучатель'],
+  ['number', '货号', 'Код груза'], ['inv_date', '发货日期', 'Дата отправки'],
+  ['sender', '发货人', 'Грузоотправитель'],
 ];
 const INV_GOODS = [
   ['goods', '品名', 'Перечень товаров'], ['pieces', '件数', 'Количество'], ['total_weight', '重量', 'Вес'], ['volume', '体积', 'Объём'],
@@ -339,7 +368,7 @@ app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
 
 // ---------- Админка ----------
 
-const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/settings', 'a_settings']];
+const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/receive', 'a_receive'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/settings', 'a_settings']];
 function adminRender(req, res, title, body) {
   const role = `<span class="badge" style="margin-left:auto">${esc(req.t(isOwner(req) ? 'role_owner' : 'role_accountant'))}</span>`;
   const tabs = ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings').map(([h, k]) => `<a href="${h}" class="${req.path === h || (h !== '/admin' && req.path.startsWith(h)) ? 'on' : ''}">${esc(req.t(k))}</a>`).join('');
@@ -422,14 +451,100 @@ app.get('/admin/clients/:id', (req, res) => {
 function parcelsTable(req, parcels) {
   const t = req.t;
   if (!parcels.length) return `<p class="muted">${esc(t('no_parcels'))}</p>`;
-  return `<form method="post" action="/admin/parcels/bulk"><div class="tbl"><table><tr><th><input type="checkbox" id="checkall" style="width:auto"></th><th>${esc(t('track'))}</th><th>${esc(t('client'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('invoice'))}</th><th>${esc(t('date'))}</th></tr>
+  return `<form method="post" action="/admin/parcels/bulk"><div class="tbl"><table><tr><th><input type="checkbox" id="checkall" style="width:auto"></th><th>${esc(t('track'))}</th><th>${esc(t('client'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('invoice'))}</th><th>${esc(t('photo'))}</th><th>${esc(t('date'))}</th></tr>
   ${parcels.map((p) => `<tr><td><input type="checkbox" name="ids" value="${p.id}" style="width:auto"></td><td><a href="/track?q=${encodeURIComponent(p.track)}">${esc(p.track)}</a></td>
   <td>${p.client_id ? `<a href="/admin/clients/${p.client_id}">${esc(p.client_code)}</a>` : `<span class="badge b-border">${esc(p.client_code || t('a_no_client'))}</span>`}</td>
-  <td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td><td>${p.invoice_id ? `<a href="/admin/invoices/${p.invoice_id}">#${p.invoice_id}</a>` : ''}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}
+  <td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td><td>${p.invoice_id ? `<a href="/admin/invoices/${p.invoice_id}">#${p.invoice_id}</a>` : ''}</td>
+  <td style="white-space:nowrap">${p.photo_token ? `<a href="/p/${esc(p.photo_token)}" target="_blank">📷</a>` : ''}${p.client_id && p.photo_token ? ` <a href="/admin/parcels/${p.id}/wa" target="_blank" title="WhatsApp">${p.wa_sent_at ? '✓' : '➤'} WA</a>` : ''}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}
   </table></div><div class="row" style="margin-top:12px"><div><label>${esc(t('a_bulk_status'))}</label><select name="status">${statusOptions(t)}</select></div>
   <div><label>${esc(t('note'))}</label><input name="comment"></div><button>${esc(t('apply'))}</button></div>
   <input type="hidden" name="back" value="${esc(req.originalUrl)}"></form>`;
 }
+
+// ---------- Приёмка на складе: код клиента + фото с камеры → посылка у клиента + сообщение в WhatsApp ----------
+
+function waArrivalUrl(req, p) {
+  const client = getClient(p.client_id);
+  const w = p.warehouse_id ? db.prepare('SELECT * FROM warehouses WHERE id = ?').get(p.warehouse_id) : null;
+  const tpl = setting('wa_arrival_' + (req.body?.wa_lang === 'zh' ? 'zh' : 'ru')) || setting('wa_arrival_ru');
+  const text = tpl.replace('{name}', client.name).replace('{mark}', dispCode(client.code)).replace('{warehouse}', w ? w.name_ru : '')
+    .replace('{places}', p.places || 1).replace('{weight}', p.weight ? `, вес: ${p.weight} кг` : '')
+    .replace('{link}', `${req.protocol}://${req.get('host')}/p/${p.photo_token}`);
+  return `https://wa.me/${client.phone}?text=${encodeURIComponent(text)}`;
+}
+
+app.get('/admin/api/client', (req, res) => {
+  const c = findClientByCode(req.query.code);
+  const client = c && getClient(c.id);
+  res.json(client ? { name: client.name, city: client.city_name || '', code: dispCode(client.code) } : null);
+});
+
+app.get('/admin/receive', (req, res) => {
+  const t = req.t;
+  const whs = activeWarehouses();
+  const lastWh = parseInt(req.session.lastWh, 10) || (whs[0] && whs[0].id);
+  const done = req.query.done ? db.prepare('SELECT * FROM parcels WHERE id = ?').get(parseInt(req.query.done, 10)) : null;
+  const doneClient = done && done.client_id ? getClient(done.client_id) : null;
+  const recent = db.prepare(`SELECT * FROM parcels WHERE photo_token IS NOT NULL AND date(created_at) = date('now') ORDER BY id DESC LIMIT 30`).all();
+  adminRender(req, res, t('a_receive'), `${done ? `<div class="card" style="border:2px solid #22c55e"><h2 style="margin-top:0">✓ ${esc(t('a_receive_saved'))}: ${esc(dispCode(done.client_code || ''))}${doneClient ? ` · ${esc(doneClient.name)}` : ''}</h2>
+      ${photoGrid(parcelPhotos(done.id))}
+      ${doneClient ? `<p><a class="btn wa-btn" href="/admin/parcels/${done.id}/wa" target="_blank">${esc(t('a_send_wa'))}</a></p>` : `<p class="alert err">${esc(t('a_no_client'))}</p>`}</div>` : ''}
+  <div class="card"><h2 style="margin-top:0">${esc(t('a_receive_title'))}</h2><p class="muted">${esc(t('a_receive_hint'))}</p>
+  <form method="post" action="/admin/receive" enctype="multipart/form-data" id="rcv">
+    <div class="seg" style="margin-bottom:10px">${whs.map((w) => `<label><input type="radio" name="warehouse_id" value="${w.id}" ${w.id === lastWh ? 'checked' : ''}><span>${esc(whName(req.lang, w))}</span></label>`).join('')}</div>
+    <label>${esc(t('code'))}</label><input name="code" id="r-code" required autocomplete="off" placeholder="D1601-4567" style="font-size:22px;font-weight:700">
+    <div id="r-who" class="muted" style="min-height:22px;margin:4px 0"></div>
+    <label class="btn photo-btn" for="r-photo">📷 ${esc(t('a_take_photo'))}</label>
+    <input type="file" name="photos" id="r-photo" accept="image/*" capture="environment" multiple hidden>
+    <div id="r-prev" class="photos"></div>
+    <div class="row"><div><label>${esc(t('places'))}</label><input name="places" inputmode="numeric" value="1"></div><div><label>${esc(t('weight'))}</label><input name="weight" inputmode="decimal"></div></div>
+    <div class="row"><div><label>${esc(t('track'))} (${esc(t('optional'))})</label><input name="track"></div><div><label>${esc(t('description'))}</label><input name="description"></div></div>
+    <p><button style="width:100%;font-size:18px;padding:14px">${esc(t('a_receive_btn'))}</button></p></form></div>
+  ${recent.length ? `<div class="card"><h2>${esc(t('a_receive_today'))} (${recent.length})</h2>${parcelsTable(req, recent)}</div>` : ''}
+  <script>(function(){const code=document.getElementById('r-code'),who=document.getElementById('r-who'),inp=document.getElementById('r-photo'),prev=document.getElementById('r-prev');let tm;
+  code.addEventListener('input',()=>{clearTimeout(tm);tm=setTimeout(async()=>{const v=code.value.trim();if(!v){who.textContent='';return}
+    try{const r=await (await fetch('/admin/api/client?code='+encodeURIComponent(v))).json();who.innerHTML=r?'✓ <b>'+r.code+'</b> · '+r.name.replace(/</g,'&lt;')+(r.city?' · '+r.city:''):'<span style="color:#b8161c">${esc(t('a_receive_unknown'))}</span>'}catch(e){}},300)});
+  // Сжимаем фото на телефоне до 1600 px, чтобы загрузка шла быстро даже по мобильной сети.
+  inp.addEventListener('change',async()=>{const out=new DataTransfer();prev.innerHTML='';for(const f of inp.files){try{const b=await createImageBitmap(f);const k=Math.min(1,1600/Math.max(b.width,b.height));const c=document.createElement('canvas');c.width=b.width*k;c.height=b.height*k;c.getContext('2d').drawImage(b,0,0,c.width,c.height);
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.82));out.items.add(new File([blob],'p.jpg',{type:'image/jpeg'}))}catch(e){out.items.add(f)}
+    const im=document.createElement('img');im.src=URL.createObjectURL(f);prev.appendChild(im)}try{inp.files=out.files}catch(e){}});
+  ${done ? '' : 'code.focus()'}})();</script>`);
+});
+
+app.post('/admin/receive', photoUpload.array('photos', 10), (req, res) => {
+  const b = req.body;
+  const c = findClientByCode(b.code);
+  const client = c && getClient(c.id);
+  const raw = String(b.code || '').trim().toUpperCase();
+  const mark = client ? dispCode(client.code) : raw;
+  const whId = parseInt(b.warehouse_id, 10) || null;
+  req.session.lastWh = whId;
+  const now = new Date();
+  // Без трек-номера посылка получает номер из кода и времени приёмки: D1601-1026-1432.
+  let track = String(b.track || '').trim();
+  if (!track) track = `${mark}-${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+  const w = whId ? db.prepare('SELECT * FROM warehouses WHERE id = ?').get(whId) : null;
+  db.exec('BEGIN');
+  const id = Number(upsertParcel({ track, clientCode: client ? client.code : raw, weight: b.weight, places: b.places, description: b.description, status: 'china' }));
+  const p = db.prepare('SELECT * FROM parcels WHERE id = ?').get(id);
+  db.prepare('UPDATE parcels SET warehouse_id = ?, photo_token = COALESCE(photo_token, ?), client_id = COALESCE(?, client_id) WHERE id = ?')
+    .run(whId, crypto.randomBytes(8).toString('base64url'), client ? client.id : null, id);
+  if (w && p.status === 'china') db.prepare("UPDATE parcel_events SET comment = ? WHERE id = (SELECT MAX(id) FROM parcel_events WHERE parcel_id = ?) AND comment = ''").run(w.name_ru, id);
+  for (const f of req.files || []) {
+    const name = `${crypto.randomUUID()}.jpg`;
+    fs.writeFileSync(require('path').join(PHOTO_DIR, name), f.buffer);
+    db.prepare('INSERT INTO parcel_photos (parcel_id, file) VALUES (?, ?)').run(id, name);
+  }
+  db.exec('COMMIT');
+  res.redirect(`/admin/receive?done=${id}`);
+});
+
+app.get('/admin/parcels/:id/wa', (req, res) => {
+  const p = db.prepare('SELECT * FROM parcels WHERE id = ?').get(parseInt(req.params.id, 10));
+  if (!p || !p.client_id || !p.photo_token) return res.redirect('/admin/parcels');
+  db.prepare("UPDATE parcels SET wa_sent_at = datetime('now') WHERE id = ?").run(p.id);
+  res.redirect(waArrivalUrl(req, p));
+});
 
 app.get('/admin/parcels', (req, res) => {
   const t = req.t; const q = String(req.query.q || '').trim(); const st = STATUSES[req.query.status] ? req.query.status : '';
@@ -582,8 +697,8 @@ app.get('/admin/invoice-template.xlsx', (req, res) => {
     ['total_weight', 'Вес / 重量'], ['volume', 'Объём / 体积'], ['rate', 'Цена / 单价'], ['price_basis', 'Цена за / 计价 (м3 / кг)'], ['packing', 'Упаковка / 打包方式'],
     ['pack_fee', 'Плата за упаковку / 包装费'], ['goods_value', 'Стоимость товара / 货值'], ['ins_rate', 'Страховка % / 保率'], ['advance', 'Перевод на заказ / 垫付款'],
     ['unload_fee', 'Плата за разгрузку / 落地费'], ['other_fee', 'Другие платежи / 其他款项'], ['destination', 'Пункт назначения / 目的地'], ['transport', 'Способ перевозки / 运输方式'],
-    ['delivery_time', 'Время доставки / 运输时间'], ['note', 'Замечание / 备注']];
-  const ex = { code: 'D1600', inv_date: '16.10.2026', goods: '汽配 Автозапчасти', pieces: 4, total_weight: 75.2, volume: 1.183, rate: 190, price_basis: 'м3', packing: '木架 Обрешётка', pack_fee: 35, goods_value: 0, ins_rate: 0, advance: 0, unload_fee: 0, other_fee: 0, destination: '阿拉木图 Алматы', transport: '陆运 Авто', delivery_time: '15–20 дней', note: '' };
+    ['note', 'Замечание / 备注']];
+  const ex = { code: 'D1600', inv_date: '16.10.2026', goods: '汽配 Автозапчасти', pieces: 4, total_weight: 75.2, volume: 1.183, rate: 190, price_basis: 'м3', packing: '木架 Обрешётка', pack_fee: 35, goods_value: 0, ins_rate: 0, advance: 0, unload_fee: 0, other_fee: 0, destination: '阿拉木图 Алматы', transport: '陆运 Авто', note: '' };
   const ws = XLSX.utils.aoa_to_sheet([head.map((h) => h[1]), head.map((h) => ex[h[0]])]);
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'invoices');
   res.setHeader('Content-Disposition', 'attachment; filename="cargo151-invoices.xlsx"');
@@ -634,7 +749,6 @@ function importInvoiceRow(req, rec, dayDefault, bad) {
   rec.destination = zh(rec.destination, DEST_RU) || (client.city_name ? `${CITY_ZH[client.city_name] || ''} ${client.city_name}`.trim() : '');
   rec.transport ||= req.body.transport || '陆运 Авто';
   rec.sender = dispCode(client.code);
-  rec.consignee ||= isOwner(req) ? `${client.name} +${client.phone}` : client.name;
   rec.client_id = client.id;
   // Без номера в файле собираем D1601-1030-4: повторная загрузка того же файла обновит накладные, а не задвоит.
   const number = String(rec.number || '').trim().toUpperCase() || (n('pieces') ? invoiceNumber(client, rec.inv_date, n('pieces')) : '');
@@ -688,7 +802,7 @@ function invoiceForm(req, client, inv) {
   const today = new Date().toISOString().slice(0, 10);
   const v = inv || {
     origin: w ? `${w.name_zh}/${w.name_ru}` : '', destination: client.city_name ? `${CITY_ZH[client.city_name] || ''} ${client.city_name}`.trim() : '',
-    transport: '陆运 Авто', sender: dispCode(client.code), consignee: isOwner(req) ? `${client.name} +${client.phone}` : client.name,
+    transport: '陆运 Авто', sender: dispCode(client.code),
     inv_date: today, rate: 0, price_basis: 'm3', ins_rate: 0, number: '',
   };
   const parcels = db.prepare('SELECT * FROM parcels WHERE client_id = ? AND (invoice_id IS NULL OR invoice_id = ?) ORDER BY id').all(client.id, inv ? inv.id : 0);
@@ -702,7 +816,7 @@ function invoiceForm(req, client, inv) {
   <datalist id="dl-pack"><option value="编织袋 Мешок"><option value="纸箱 Коробка"><option value="木架 Обрешётка"><option value="木架+加固 Обрешётка+усиление"></datalist>
   <div class="row">${inp('origin', '始发地', 'Пункт вылета', 'list="dl-origin"')}${inp('destination', '目的地', 'Пункт назначения', 'list="dl-dest"')}${inp('transport', '运输方式', 'Способ перевозки', 'list="dl-tr"')}</div>
   <div class="row"><div><label>发货日期 · Дата отправки</label><input type="date" name="inv_date" id="i-inv_date" value="${esc(String(v.inv_date || today).slice(0, 10))}"></div>
-    ${inp('delivery_time', '运输时间', 'Время доставки', 'placeholder="15–20 дней"')}${inp('sender', '发货人', 'Грузоотправитель')}${inp('consignee', '提货联系电话', 'Грузополучатель')}</div>
+    ${inp('sender', '发货人', 'Грузоотправитель')}</div>
   ${parcels.length ? `<h3>${esc(t('a_pick_parcels'))}</h3><div class="tbl"><table><tr><th></th><th>${esc(t('track'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th></tr>
     ${parcels.map((p) => `<tr><td><input type="checkbox" name="ids" value="${p.id}" ${!inv || p.invoice_id === inv.id ? 'checked' : ''} style="width:auto" data-w="${p.weight || 0}" data-p="${p.places || 0}"></td><td>${esc(p.track)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td></tr>`).join('')}</table></div>` : ''}
   <div class="row">${inp('goods', '品名', 'Перечень товаров')}${inp('pieces', '件数', 'Мест')}${inp('total_weight', '重量', 'Вес, кг')}${inp('volume', '体积', 'Объём, м³')}</div>
@@ -836,6 +950,9 @@ app.get('/admin/settings', (req, res) => {
     <div class="card"><h2>${esc(t('nav_info'))}</h2><p class="muted">${esc(t('s_info_hint'))}</p>
       <label>рус</label><textarea name="info_ru" style="min-height:260px">${esc(setting('info_ru'))}</textarea>
       <label>中文</label><textarea name="info_zh" style="min-height:260px">${esc(setting('info_zh'))}</textarea></div>
+    <div class="card"><h2>${esc(t('s_wa_arrival'))}</h2><p class="muted">{name} {mark} {warehouse} {places} {weight} {link}</p>
+      <label>рус</label><textarea name="wa_arrival_ru" style="min-height:80px">${esc(setting('wa_arrival_ru'))}</textarea>
+      <label>中文</label><textarea name="wa_arrival_zh" style="min-height:80px">${esc(setting('wa_arrival_zh'))}</textarea></div>
     <div class="card"><h2>${esc(t('s_invoice'))}</h2><div class="row"><div><label>${esc(t('s_inv_company'))}</label><input name="invoice_company" value="${esc(setting('invoice_company'))}"></div>
       <div><label>${esc(t('s_inv_title'))}</label><input name="invoice_title" value="${esc(setting('invoice_title'))}"></div></div>
       <label>${esc(t('s_inv_rules'))}</label><textarea name="invoice_rules" style="min-height:320px">${esc(setting('invoice_rules'))}</textarea></div>
@@ -860,7 +977,7 @@ app.post('/admin/settings', (req, res) => {
     db.prepare(`INSERT INTO warehouses (${f.join(', ')}) VALUES (${f.map(() => '?').join(', ')})`).run(...f.map((k) => String(b[`wh_new_${k}`] || '').trim()));
   }
   for (const c of db.prepare('SELECT id FROM cities').all()) db.prepare('UPDATE cities SET pickup_address = ? WHERE id = ?').run(String(b[`city_${c.id}`] ?? '').trim(), c.id);
-  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'invoice_company', 'invoice_title', 'invoice_rules']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
+  for (const k of ['rate_per_kg', 'currency', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'invoice_company', 'invoice_title', 'invoice_rules', 'wa_arrival_ru', 'wa_arrival_zh']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
   db.exec('COMMIT');
   req.session.flash = req.t('saved');
   res.redirect('/admin/settings');

@@ -65,6 +65,10 @@ const T = {
     inv_zoom_hint: 'Поверните телефон или увеличьте пальцами, чтобы рассмотреть.', inv_cargo_status: 'Отслеживание', inv_pay_note: 'Оплата', inv_arrived: 'Прибыл',
     a_add_client: 'Добавить клиента со старым кодом', a_add_client_hint: 'Для клиентов, у которых уже есть код (например D185, Y58, AB016). Клиент войдёт в кабинет по своему WhatsApp и этому коду. Новые клиенты получают код сами на сайте.',
     a_add_client_err: 'Заполните код, имя и номер', a_add_client_dup: 'Такой код или номер уже есть',
+    a_receive: 'Приёмка', a_receive_title: 'Приёмка посылки на складе', a_receive_hint: 'Введите код с коробки, сфотографируйте посылку и сохраните. Посылка появится у клиента, а кнопка откроет WhatsApp клиента с готовым текстом и ссылкой на фото.',
+    a_take_photo: 'Сфотографировать', a_receive_btn: 'Сохранить посылку', a_receive_saved: 'Посылка сохранена', a_send_wa: 'Отправить клиенту в WhatsApp',
+    a_receive_today: 'Принято сегодня', a_receive_unknown: 'Клиент с таким кодом не найден — посылка сохранится без клиента', optional: 'если есть',
+    photo: 'Фото', look: 'Смотреть', s_wa_arrival: 'Текст WhatsApp о прибытии посылки',
     a_password_note: 'Пароли: владелец — ADMIN_PASSWORD, бухгалтер — ACCOUNTANT_PASSWORD (на сервере в /etc/cargo151.env)',
   },
   zh: {
@@ -131,6 +135,10 @@ const T = {
     inv_zoom_hint: '横屏或双指放大查看。', inv_cargo_status: '运踪', inv_pay_note: '付款', inv_arrived: '已到',
     a_add_client: '添加老客户（已有编码）', a_add_client_hint: '用于已有编码的客户（如 D185、Y58、AB016）。客户用 WhatsApp 号码和此编码登录。新客户在网站上自动获得编码。',
     a_add_client_err: '请填写编码、姓名和电话', a_add_client_dup: '该编码或电话已存在',
+    a_receive: '收货', a_receive_title: '仓库收货', a_receive_hint: '输入箱子上的编码，拍照并保存。客户会看到包裹，按钮会打开客户的 WhatsApp，附带消息和照片链接。',
+    a_take_photo: '拍照', a_receive_btn: '保存包裹', a_receive_saved: '包裹已保存', a_send_wa: '通过 WhatsApp 发给客户',
+    a_receive_today: '今日收货', a_receive_unknown: '找不到该编码的客户，包裹将保存为未分配', optional: '如有',
+    photo: '照片', look: '查看', s_wa_arrival: '包裹到仓 WhatsApp 消息',
     a_password_note: '密码：老板 ADMIN_PASSWORD，会计 ACCOUNTANT_PASSWORD（服务器 /etc/cargo151.env）',
   },
 };

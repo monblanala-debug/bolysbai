@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS parcel_events (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS parcel_photos (
+  id INTEGER PRIMARY KEY,
+  parcel_id INTEGER NOT NULL REFERENCES parcels(id),
+  file TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
 `);
 
 // Колонки, добавленные после первой версии: досоздаём в старых базах.
@@ -81,6 +87,10 @@ for (const [table, col, def] of [
   ['invoices', 'pay_note', "TEXT DEFAULT ''"],
   // Клиенты со старым кодом (D185, Y58…), добавленные вручную: не сдвигают нумерацию новых кодов.
   ['clients', 'legacy', 'INTEGER DEFAULT 0'],
+  // Приёмка на складе: ссылка на фото для клиента, когда отправили в WhatsApp, на каком складе.
+  ['parcels', 'photo_token', 'TEXT'],
+  ['parcels', 'wa_sent_at', 'TEXT'],
+  ['parcels', 'warehouse_id', 'INTEGER'],
   ['invoices', 'pieces', 'INTEGER DEFAULT 0'],
   ...['volume', 'freight', 'goods_value', 'ins_rate', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee']
     .map((c) => ['invoices', c, 'REAL DEFAULT 0']),
@@ -207,6 +217,8 @@ seed();
 // Настройки, появившиеся позже: в старых базах дописываем, не трогая уже заполненные.
 {
   const def = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+  def.run('wa_arrival_ru', 'Здравствуйте, {name}! Ваша посылка {mark} прибыла на склад {warehouse}. Мест: {places}{weight}. Фото: {link}');
+  def.run('wa_arrival_zh', '您好，{name}！您的包裹 {mark} 已到达{warehouse}仓库。件数：{places}{weight}。照片：{link}');
   def.run('invoice_company', '义乌市坦达供应链管理有限公司');
   def.run('invoice_title', '151库 Cargo');
   def.run('invoice_rules', `ПРАВИЛА ОТПРАВКИ ГРУЗОВ ИЗ КИТАЯ

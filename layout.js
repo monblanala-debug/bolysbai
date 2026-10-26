@@ -28,6 +28,8 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;p
 .alert{padding:10px 14px;border-radius:8px;margin-bottom:12px}.alert.err{background:#fee2e2;color:#991b1b}.alert.ok{background:#dcfce7;color:#166534}.alert.info{background:#fdf1f1;color:var(--ink);border:1px solid #f3d2d3}
 .stat{font-size:28px;font-weight:800}
 .narrow{max-width:640px;margin:0 auto}.keepers{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);display:grid;gap:4px;font-size:15px}.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:#f1e9ea;border-radius:12px;padding:4px;gap:4px;margin-bottom:14px}.seg a{text-align:center;padding:12px 8px;border-radius:9px;font-weight:700;font-size:17px;color:var(--ink)}.seg a:hover{text-decoration:none;background:#fff}.seg a.on{background:var(--brand);color:#fff;box-shadow:0 2px 8px rgba(229,38,45,.3)}.seg a.on::before{content:'✓ '}
+.seg label{margin:0;cursor:pointer}.seg label input{position:absolute;opacity:0;pointer-events:none}.seg label span{display:block;text-align:center;padding:12px 8px;border-radius:9px;font-weight:700;font-size:17px}
+.seg label input:checked+span{background:var(--brand);color:#fff;box-shadow:0 2px 8px rgba(229,38,45,.3)}.seg label input:checked+span::before{content:'✓ '}.seg label input:focus-visible+span{outline:2px solid var(--brand)}
 .codebar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-color:var(--brand);background:var(--brand-soft)}.center{text-align:center}.code.big{font-size:44px;margin:8px 0}.wide{width:100%;margin-top:16px;text-align:center}
 .hint{font-size:13px;color:var(--muted);background:#faf5f5;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:6px}
 .pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}.pick label{margin:0;cursor:pointer}.pick input{position:absolute;opacity:0;pointer-events:none}
@@ -79,13 +81,15 @@ body{padding-bottom:72px}
 .wb-fit{overflow:hidden;margin-bottom:12px}.wb-sheet{width:1040px;margin:0;transform-origin:0 0}
 .wb-top{display:flex;align-items:center;gap:16px;padding:10px 14px;border-bottom:1.5px solid #333}.wb-top img{height:60px}.wb-top>div{flex:1;text-align:center}
 .wb-top .co{font-size:26px;font-weight:700;letter-spacing:.04em}.wb-top .ti{font-size:26px;font-weight:800;margin-top:2px}
-.wb .g{display:grid;border-bottom:1.5px solid #333}.wb .head{grid-template-columns:repeat(4,1fr)}.wb .goods{grid-template-columns:1.7fr repeat(8,1fr) 1.6fr repeat(4,1fr)}.wb .sum{grid-template-columns:2fr 1fr}
+.wb .g{display:grid;border-bottom:1.5px solid #333}.wb .head{grid-template-columns:repeat(3,1fr)}.wb .goods{grid-template-columns:1.7fr repeat(8,1fr) 1.6fr repeat(4,1fr)}.wb .sum{grid-template-columns:2fr 1fr}
 .wb .c{display:flex;flex-direction:column;border-right:1px solid #999;border-bottom:1px solid #999;min-width:0}
 .wb .l{background:#bfe3f7;font-size:13px;line-height:1.25;text-align:center;padding:4px 2px;color:#223}.wb .goods .l{background:#fde68a;font-size:12px;min-height:50px}.wb .sum .l{background:#fff200}
 .wb .v{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px 4px;font-weight:700;font-size:17px;overflow-wrap:anywhere}.wb .goods .v{font-size:16px}.wb .v.big{color:#e5262d;font-size:28px}
 .wb-tracks{padding:8px 12px;font-size:14px;border-bottom:1px solid #999;overflow-wrap:anywhere}
 .wb-rules{padding:8px 12px;font-size:12.5px;line-height:1.45}.wb-rules .rh{text-align:center;font-size:15px;margin-bottom:6px}.wb-rules p{margin:0 0 3px}
 .only-m{display:none}@media (max-width:720px){.only-m{display:block}}
+.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:10px 0}.photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;display:block;background:#eee}
+.photo-btn{display:block;text-align:center;font-size:18px;padding:16px;margin:6px 0}.wa-btn{background:#22c55e;font-size:18px;padding:14px 22px}
 @media print{header,footer,.wa-fab,.noprint{display:none!important}.wb-sheet{width:auto!important;transform:none!important;font-size:12px}.wb-fit{height:auto!important}.wb .goods .l{font-size:10px}.wb .v{font-size:13px}.card{border:0}body{background:#fff}}
 `;
 
