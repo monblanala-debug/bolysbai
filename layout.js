@@ -51,7 +51,22 @@ footer{max-width:1100px;margin:0 auto;padding:8px max(16px,env(safe-area-inset-l
 @keyframes pulse{0%{transform:scale(.6);opacity:.45}100%{transform:scale(2.4);opacity:0}}
 .truck{animation:drive 14s linear infinite}
 @keyframes drive{from{transform:translateX(-160px)}to{transform:translateX(960px)}}
-@media (prefers-reduced-motion:reduce){.route.flow,.pulse,.truck{animation:none}.mover{display:none}}
+button.copied,.btn.copied{background:var(--ok)!important;color:#fff!important;transition:background .2s}
+.code.landed{animation:land .35s ease-out}@keyframes land{0%{transform:scale(1.12)}100%{transform:scale(1)}}
+.hero .route,.hero .glow{transition:opacity .3s,stroke-width .3s}.hero.sel .route:not(.hl),.hero.sel .glow:not(.hl){opacity:.15}.hero .route.hl{stroke-width:4}.hero .glow.hl{opacity:.3}
+.hero .city text{transition:font-size .3s}.hero .city.hl text{font-size:24px;fill:var(--brand)}.hero .city.hl .pulse{animation-duration:1s}
+.prog{position:relative;padding-top:24px;margin:6px 0 4px;min-width:220px}.prog .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.prog .bar i{display:block;height:100%;width:var(--p);background:var(--brand);border-radius:3px;animation:grow 1.4s cubic-bezier(.2,.7,.3,1)}
+.prog .ptruck{position:absolute;top:2px;left:clamp(0px,calc(var(--p) - 26px),calc(100% - 26px));animation:drive-in 1.4s cubic-bezier(.2,.7,.3,1);line-height:0}
+.prog ol{position:relative;height:16px;list-style:none;padding:0;margin:6px 0 0;font-size:11px;color:var(--muted)}
+.prog ol li{position:absolute;top:0;white-space:nowrap;transform:translateX(-50%)}.prog ol li:first-child{transform:none}.prog ol li:last-child{transform:translateX(-100%)}.prog ol li.done{color:var(--ink)}.prog ol li.on{color:var(--brand);font-weight:700}
+.prog.compact{padding-top:20px;min-width:140px}.prog.compact ol{display:none}
+@keyframes grow{from{width:0}}@keyframes drive-in{from{left:0}}
+.parcel{display:grid;gap:8px}.parcel .hist{font-size:13px;color:var(--muted)}
+.fade>*{animation:fadeUp .5s ease-out both}.fade>*:nth-child(2){animation-delay:.08s}.fade>*:nth-child(3){animation-delay:.16s}.fade>*:nth-child(4){animation-delay:.24s}.fade>*:nth-child(n+5){animation-delay:.3s}
+.fade .card>h2{animation:fadeUp .5s ease-out both}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.route.flow,.pulse,.truck,.prog .bar i,.prog .ptruck,.fade>*,.fade .card>h2,.code.landed{animation:none}.mover{display:none}}
 @media (max-width:720px){header .in{gap:8px 12px}header nav{order:3;flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;gap:16px;padding-bottom:4px;scrollbar-width:none}header nav a{white-space:nowrap}.lang{margin-left:auto}}
 .wa-fab{position:fixed;right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;gap:8px;background:#25d366;color:#fff;font-weight:700;padding:10px 16px 10px 12px;border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.18);z-index:15}.wa-fab:hover{text-decoration:none;background:#1ebe5a}
 @media (max-width:720px){.wa-fab span{display:none}.wa-fab{padding:12px}}
@@ -60,11 +75,21 @@ body{padding-bottom:72px}
 `;
 
 const JS = `
+const calm=matchMedia('(prefers-reduced-motion: reduce)').matches;
 document.addEventListener('click',e=>{const b=e.target.closest('[data-copy]');if(!b)return;
-const el=document.getElementById(b.dataset.copy);navigator.clipboard.writeText(el.innerText).then(()=>{const o=b.innerText;b.innerText=b.dataset.done||'OK';setTimeout(()=>b.innerText=o,1500)})});
-document.addEventListener('click',e=>{const b=e.target.closest('[data-wh]');if(!b)return;
-document.querySelectorAll('[data-wh]').forEach(x=>x.classList.toggle('sec',x!==b));document.querySelectorAll('[data-wh-block]').forEach(x=>x.hidden=x.dataset.whBlock!==b.dataset.wh)});
+const el=document.getElementById(b.dataset.copy);const text=el.dataset.final||el.innerText;
+const done=()=>{const o=b.dataset.label||b.innerText;b.dataset.label=o;b.classList.add('copied');b.innerText='✓ '+(b.dataset.done||'OK');clearTimeout(b._t);b._t=setTimeout(()=>{b.classList.remove('copied');b.innerText=o},1800)};
+const select=()=>{const r=document.createRange();r.selectNodeContents(el);const s=getSelection();s.removeAllRanges();s.addRange(r)};
+try{navigator.clipboard.writeText(text).then(done,()=>{select();done()})}catch(_){select();done()}});
 document.addEventListener('change',e=>{if(e.target.id==='checkall')document.querySelectorAll('input[name=ids]').forEach(c=>c.checked=e.target.checked)});
+// Код «выпадает» как на табло: цифры перебираются и встают по местам слева направо.
+document.querySelectorAll('[data-flip]').forEach(el=>{const fin=el.textContent;el.dataset.final=fin;if(calm)return;let f=0;const total=22;
+const iv=setInterval(()=>{f++;const settled=Math.floor(f/total*fin.length);el.textContent=[...fin].map((c,i)=>i<settled||!/[0-9]/.test(c)?c:String(Math.floor(Math.random()*10))).join('');if(f>=total){clearInterval(iv);el.textContent=fin;el.classList.add('landed')}},45)});
+// Подсветка выбранного склада выдачи на карте.
+const city=document.getElementById('f-city');const hero=document.querySelector('.hero');
+if(city&&hero)city.addEventListener('change',()=>{const name=city.options[city.selectedIndex].text;const g=hero.querySelector('[data-city="'+name+'"]');
+hero.querySelectorAll('.hl').forEach(x=>x.classList.remove('hl'));hero.classList.toggle('sel',!!g);if(!g)return;g.classList.add('hl');
+hero.querySelectorAll('[data-to="'+g.dataset.key+'"]').forEach(x=>x.classList.add('hl'))});
 `;
 
 function page({ title, body, t, lang, path, session, whatsapp }) {
@@ -89,19 +114,20 @@ function heroMap(t, lang) {
     ala: [350, 165, lang === 'zh' ? '阿拉木图' : 'Алматы'], bsk: [290, 215, lang === 'zh' ? '比什凯克' : 'Бишкек'],
     msk: [60, 90, lang === 'zh' ? '莫斯科' : 'Москва'],
   };
+  const RU = { ala: 'Алматы', bsk: 'Бишкек', msk: 'Москва' }; // как в списке складов выдачи
   const routes = [['gz', 'ala', -40], ['yw', 'ala', -30], ['gz', 'bsk', 30], ['yw', 'msk', -50], ['gz', 'msk', -30]];
   const path = ([a, b, bend]) => {
     const [x1, y1] = P[a]; const [x2, y2] = P[b];
     return `M${x1},${y1} Q${(x1 + x2) / 2},${(y1 + y2) / 2 + bend} ${x2},${y2}`;
   };
-  const lines = routes.map((r, i) => `<path id="rt${i}" d="${path(r)}" class="glow"/><path d="${path(r)}" class="route flow" style="animation-delay:-${i * 0.3}s"/>`).join('');
+  const lines = routes.map((r, i) => `<path id="rt${i}" d="${path(r)}" class="glow" data-to="${r[1]}"/><path d="${path(r)}" class="route flow" data-to="${r[1]}" style="animation-delay:-${i * 0.3}s"/>`).join('');
   const movers = routes.map((r, i) => `<circle r="4" fill="#e5262d" class="mover"><animateMotion dur="${4 + (i % 3)}s" begin="${i * 0.7}s" repeatCount="indefinite" rotate="auto"><mpath href="#rt${i}"/></animateMotion></circle>`).join('');
   const plane = `<g class="mover"><path d="M-9,0 L9,0 M2,-7 L5,0 L2,7 M-7,-3 L-5,0 L-7,3" stroke="#e5262d" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/><animateMotion dur="7s" repeatCount="indefinite" rotate="auto-reverse"><mpath href="#rt4"/></animateMotion></g>`;
   const cities = Object.entries(P).map(([k, [x, y, name]]) => {
     const hub = k === 'gz' || k === 'yw';
-    return `<circle cx="${x}" cy="${y}" r="${hub ? 9 : 6}" class="pulse" style="animation-delay:-${(x % 7) / 3}s"/>
+    return `<g class="city" data-key="${k}" data-city="${RU[k] || ''}"><circle cx="${x}" cy="${y}" r="${hub ? 9 : 6}" class="pulse" style="animation-delay:-${(x % 7) / 3}s"/>
       <circle cx="${x}" cy="${y}" r="${hub ? 6 : 4.5}" fill="${hub ? '#e5262d' : '#fff'}" stroke="#e5262d" stroke-width="2.5"/>
-      <text x="${x + (hub ? 14 : 11)}" y="${y + 6}" font-size="${hub ? 22 : 18}" font-weight="${hub ? 800 : 600}" fill="#22191a">${esc(name)}</text>`;
+      <text x="${x + (hub ? 14 : 11)}" y="${y + 6}" font-size="${hub ? 22 : 18}" font-weight="${hub ? 800 : 600}" fill="#22191a">${esc(name)}</text></g>`;
   }).join('');
   const dots = `<pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" fill="#e8caca"/></pattern>`;
   const truck = `<g class="truck"><g transform="translate(0,352)">
@@ -115,4 +141,14 @@ function heroMap(t, lang) {
     </div>`;
 }
 
-module.exports = { page, esc, heroMap };
+// Шкала статуса: фура доезжает до текущего этапа.
+const STAGES = ['china', 'transit', 'border', 'arrived', 'delivered'];
+function statusLine(t, status, compact) {
+  const idx = STAGES.indexOf(status);
+  const pct = idx < 0 ? 0 : (idx / (STAGES.length - 1)) * 100;
+  const truck = `<svg width="26" height="16" viewBox="0 0 26 16" aria-hidden="true"><rect x="0" y="1" width="16" height="10" rx="1.5" fill="#e5262d"/><path d="M17 4h4.5l3.5 3.5V11h-8z" fill="#b8161c"/><circle cx="5" cy="13" r="2.4" fill="#22191a"/><circle cx="20" cy="13" r="2.4" fill="#22191a"/></svg>`;
+  const labels = STAGES.map((s, i) => `<li class="${i < idx ? 'done' : i === idx ? 'on' : ''}" style="left:${(i / (STAGES.length - 1)) * 100}%">${esc(t('sl_' + s))}</li>`).join('');
+  return `<div class="prog${compact ? ' compact' : ''}" style="--p:${pct}%" title="${esc(t('st_' + status))}"><span class="ptruck">${truck}</span><div class="bar"><i></i></div><ol>${labels}</ol></div>`;
+}
+
+module.exports = { page, esc, heroMap, statusLine };

@@ -5,7 +5,7 @@ const XLSX = require('xlsx');
 const crypto = require('crypto');
 const { db, STATUSES, setting, normPhone, nextClientCode, shippingMark, upsertParcel, addEvent, numOrNull, linkOrphanParcels } = require('./db');
 const { t: tr, LANGS } = require('./i18n');
-const { page, esc, heroMap } = require('./layout');
+const { page, esc, heroMap, statusLine } = require('./layout');
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin151';
 // Бухгалтер: работает с посылками и накладными, но не видит телефоны клиентов и настройки.
@@ -88,16 +88,21 @@ function renderInfo(text) {
 }
 
 // Текстовые страницы, редактируются в админке → Настройки.
+// Каждый раздел «# …» — отдельная карточка, чтобы блоки появлялись по очереди.
+function renderInfoCards(text) {
+  return String(text || '').split(/\n(?=# )/).map((part) => `<div class="card">${renderInfo(part)}</div>`).join('');
+}
+
 app.get('/info', (req, res) => {
   const t = req.t;
   const whs = activeWarehouses();
-  res.render(t('nav_info'), `<div class="narrow"><div class="card"><h1>${esc(t('nav_info'))}</h1>
+  res.render(t('nav_info'), `<div class="narrow fade"><div class="card"><h1>${esc(t('nav_info'))}</h1>
     <h2>${esc(t('hours'))}</h2><ul>${whs.map((w) => `<li><b>${esc(whName(req.lang, w))}</b> — ${esc(req.lang === 'zh' ? w.hours_zh : w.hours_ru)}</li>`).join('')}</ul>
     ${renderInfo(setting(req.lang === 'zh' ? 'info_zh' : 'info_ru'))}</div></div>`);
 });
 for (const [path, key] of [['/about', 'about'], ['/services', 'services']]) {
   app.get(path, (req, res) => {
-    res.render(req.t('nav_' + key), `<div class="narrow"><div class="card">${renderInfo(setting(`${key}_${req.lang === 'zh' ? 'zh' : 'ru'}`))}</div></div>`);
+    res.render(req.t('nav_' + key), `<div class="narrow fade">${renderInfoCards(setting(`${key}_${req.lang === 'zh' ? 'zh' : 'ru'}`))}</div>`);
   });
 }
 
@@ -162,7 +167,7 @@ function codeBanner(req, client) {
   const w = activeWarehouses()[0];
   const mark = w ? shippingMark(w.mark_template, client) : client.code;
   return `${flash ? `<div class="alert ok">${esc(flash)}</div>` : ''}<div class="card codebar">
-    <div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div><div class="code" id="c-mark">${esc(mark)}</div></div>
+    <div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div><div class="code" id="c-mark" data-flip>${esc(mark)}</div></div>
     ${copyBtn(t, 'c-mark', t('copy_code'))}</div>`;
 }
 
@@ -212,12 +217,14 @@ app.get('/track', (req, res) => {
   const tracks = String(req.query.q || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean).slice(0, 50);
   let results = '';
   if (tracks.length) {
-    const rows = tracks.map((tr) => {
+    results = `<div class="fade">${tracks.map((tr) => {
       const p = db.prepare('SELECT * FROM parcels WHERE track = ?').get(tr);
-      if (!p) return `<tr><td>${esc(tr)}</td><td colspan="4" class="muted">${esc(t('track_none'))}</td></tr>`;
-      return `<tr><td><b>${esc(p.track)}</b></td><td>${statusBadge(t, p.status)}</td><td>${p.weight || ''}</td><td>${p.places || ''}</td><td style="font-size:13px">${parcelHistory(t, p.id)}</td></tr>`;
-    }).join('');
-    results = `<div class="card tbl"><table><tr><th>${esc(t('track'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('history'))}</th></tr>${rows}</table></div>`;
+      if (!p) return `<div class="card"><b>${esc(tr)}</b><p class="muted" style="margin:4px 0 0">${esc(t('track_none'))}</p></div>`;
+      return `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(p.track)}</b><div style="flex:0 0 auto">${statusBadge(t, p.status)}</div></div>
+        ${statusLine(t, p.status)}
+        <div class="muted">${esc(t('weight'))}: ${p.weight || '—'} · ${esc(t('places'))}: ${p.places || '—'}${p.description ? ' · ' + esc(p.description) : ''}</div>
+        <details class="hist"><summary>${esc(t('history'))}</summary>${parcelHistory(t, p.id)}</details></div>`;
+    }).join('')}</div>`;
   }
   res.render(t('track_title'), `<div class="card"><h1>${esc(t('track_title'))}</h1>
     <form method="get"><textarea name="q" placeholder="${esc(t('track_placeholder'))}">${esc(tracks.join('\n'))}</textarea>
@@ -249,10 +256,10 @@ app.get('/cabinet', (req, res) => {
   const invoices = db.prepare('SELECT * FROM invoices WHERE client_id = ? ORDER BY id DESC').all(client.id);
   const w = activeWarehouses()[0];
   const pRows = parcels.length ? `<div class="tbl"><table><tr><th>${esc(t('track'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('date'))}</th></tr>
-    ${parcels.map((p) => `<tr><td><a href="/track?q=${encodeURIComponent(p.track)}">${esc(p.track)}</a></td><td>${statusBadge(t, p.status)}</td><td>${p.weight || ''}</td><td>${p.places || ''}</td><td>${esc(p.description)}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}</table></div>`
+    ${parcels.map((p) => `<tr><td><a href="/track?q=${encodeURIComponent(p.track)}">${esc(p.track)}</a></td><td>${statusBadge(t, p.status)}${statusLine(t, p.status, true)}</td><td>${p.weight || ''}</td><td>${p.places || ''}</td><td>${esc(p.description)}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}</table></div>`
     : `<p class="muted">${esc(t('no_parcels'))}</p>`;
   res.render(t('nav_cabinet'), `${notice(req)}<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
-    <div class="code">${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
+    <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
     <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>
     <div class="card"><h2>${esc(t('my_parcels'))}</h2>${pRows}</div>
     <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoicesTable(t, invoices, '/invoice/')}</div>`);
