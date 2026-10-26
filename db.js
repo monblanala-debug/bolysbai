@@ -70,6 +70,13 @@ CREATE TABLE IF NOT EXISTS invoice_photos (
   file TEXT NOT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS news (
+  id INTEGER PRIMARY KEY,
+  text_ru TEXT NOT NULL,
+  text_zh TEXT DEFAULT '',
+  text_kk TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS parcel_photos (
   id INTEGER PRIMARY KEY,
   parcel_id INTEGER NOT NULL REFERENCES parcels(id),

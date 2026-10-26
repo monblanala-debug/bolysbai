@@ -11,7 +11,7 @@ DATA_DIR=/var/lib/cargo151
 ENV_FILE=/etc/cargo151.env
 
 apt-get update
-apt-get install -y curl git nginx
+apt-get install -y curl git nginx rsync
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 22 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
@@ -32,10 +32,16 @@ PORT=3000
 DB_PATH=$DATA_DIR/cargo151.db
 ADMIN_PASSWORD=$ADMIN_PASSWORD
 ACCOUNTANT_PASSWORD=$ACCOUNTANT_PASSWORD
+KEEPER_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
 SESSION_SECRET=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48)
 EOF
   chmod 600 "$ENV_FILE"
 fi
+# Пароль кладовщика появился позже: добавляем в старый файл, если его там нет.
+grep -q '^KEEPER_PASSWORD=' "$ENV_FILE" || echo "KEEPER_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)" >> "$ENV_FILE"
+
+# Резервная копия каждую ночь в 03:30 в /var/backups/cargo151 (14 дней).
+echo "30 3 * * * root bash $APP_DIR/deploy/backup.sh" > /etc/cron.d/cargo151-backup
 
 cat > /etc/systemd/system/cargo151.service <<EOF
 [Unit]
@@ -83,3 +89,4 @@ echo "Готово. Сайт: http://${DOMAIN:-$(curl -s ifconfig.me)}"
 echo "Админка: /admin"
 echo "  пароль владельца:   $(grep '^ADMIN_PASSWORD' "$ENV_FILE" | cut -d= -f2)"
 echo "  пароль бухгалтера:  $(grep '^ACCOUNTANT_PASSWORD' "$ENV_FILE" | cut -d= -f2)"
+echo "  пароль кладовщика:  $(grep '^KEEPER_PASSWORD' "$ENV_FILE" | cut -d= -f2)"

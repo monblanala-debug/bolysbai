@@ -10,8 +10,11 @@ const { page, esc, heroMap, statusLine } = require('./layout');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin151';
 // Бухгалтер: работает с посылками и накладными, но не видит телефоны клиентов и настройки.
 const ACCOUNTANT_PASSWORD = process.env.ACCOUNTANT_PASSWORD || 'buh151';
+// Кладовщик: видит только список накладных без цен и загружает фото с весов.
+const KEEPER_PASSWORD = process.env.KEEPER_PASSWORD || 'sklad151';
 const PORT = process.env.PORT || 3000;
 const isOwner = (req) => req.session.admin === 'owner';
+const isKeeper = (req) => req.session.admin === 'keeper';
 // Код для людей: цифровые коды пишем с D (D1600), старые буквенные (Y58, AB016) как есть.
 const dispCode = (code) => (/^\d/.test(code) ? `D${code}` : code);
 
@@ -31,8 +34,9 @@ app.use(session({
 }));
 
 app.use((req, res, next) => {
-  const m = /(?:^|;\s*)lang=(ru|zh)/.exec(req.headers.cookie || '');
-  req.lang = m ? m[1] : (/^zh/i.test(req.headers['accept-language'] || '') ? 'zh' : 'ru');
+  const m = /(?:^|;\s*)lang=(ru|kk|zh)/.exec(req.headers.cookie || '');
+  const al = req.headers['accept-language'] || '';
+  req.lang = m ? m[1] : /^zh/i.test(al) ? 'zh' : /^kk/i.test(al) ? 'kk' : 'ru';
   req.t = tr(req.lang);
   res.render = (title, body) => res.send(page({ title, body, t: req.t, lang: req.lang, path: req.path, session: req.session, whatsapp: setting('whatsapp') }));
   next();
@@ -265,6 +269,14 @@ app.get('/photo/:file', (req, res) => {
   res.sendFile(require('path').join(PHOTO_DIR, f), { maxAge: '30d' });
 });
 
+// Объявления: клиент видит их в кабинете, свежие сверху. Удаляются в админке, когда неактуальны.
+const newsText = (lang, n) => (lang === 'zh' && n.text_zh) || (lang === 'kk' && n.text_kk) || n.text_ru;
+function newsBlock(req) {
+  const rows = db.prepare('SELECT * FROM news ORDER BY id DESC LIMIT 5').all();
+  if (!rows.length) return '';
+  return `<div class="card news"><h2>📢 ${esc(req.t('news_title'))}</h2>${rows.map((n) => `<div class="news-i"><span class="muted">${esc(fmtDay(n.created_at))}</span> ${esc(newsText(req.lang, n))}</div>`).join('')}</div>`;
+}
+
 // ---------- Личный кабинет ----------
 
 function invoicesTable(t, invoices, base) {
@@ -305,7 +317,7 @@ app.get('/cabinet', (req, res) => {
   const w = activeWarehouses()[0];
   res.render(t('nav_cabinet'), `<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
     <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
-    <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>${promo(req)}
+    <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>${newsBlock(req)}${promo(req)}
     <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoicesTable(t, invoices, '/invoice/')}</div>
 `);
 });
@@ -398,10 +410,11 @@ app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
 
 // ---------- Админка ----------
 
-const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/settings', 'a_settings']];
+const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/report', 'a_report'], ['/admin/news', 'a_news'], ['/admin/settings', 'a_settings']];
 function adminRender(req, res, title, body) {
-  const role = `<span class="badge" style="margin-left:auto">${esc(req.t(isOwner(req) ? 'role_owner' : 'role_accountant'))}</span>`;
-  const tabs = ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings').map(([h, k]) => `<a href="${h}" class="${req.path === h || (h !== '/admin' && req.path.startsWith(h)) ? 'on' : ''}">${esc(req.t(k))}</a>`).join('');
+  const role = `<span class="badge" style="margin-left:auto">${esc(req.t(isOwner(req) ? 'role_owner' : isKeeper(req) ? 'role_keeper' : 'role_accountant'))}</span>`;
+  const list = isKeeper(req) ? [['/admin/photos', 'a_scale_photos']] : ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings');
+  const tabs = list.map(([h, k]) => `<a href="${h}" class="${req.path === h || (h !== '/admin' && req.path.startsWith(h)) ? 'on' : ''}">${esc(req.t(k))}</a>`).join('');
   const flash = req.session.flash; delete req.session.flash;
   res.render(title, `<div class="subnav noprint">${tabs}${role}</div>${flash ? `<div class="alert ok">${esc(flash)}</div>` : ''}${body}`);
 }
@@ -410,13 +423,15 @@ app.post('/admin/login', (req, res) => {
   const same = (x, y) => { const a = Buffer.from(String(x || '')); const b = Buffer.from(y); return a.length === b.length && crypto.timingSafeEqual(a, b); };
   if (same(req.body.password, ADMIN_PASSWORD)) req.session.admin = 'owner';
   else if (same(req.body.password, ACCOUNTANT_PASSWORD)) req.session.admin = 'accountant';
+  else if (same(req.body.password, KEEPER_PASSWORD)) req.session.admin = 'keeper';
   res.redirect('/admin' + (req.session.admin ? '' : '?err=1'));
 });
 
 app.use('/admin', (req, res, next) => {
   if (req.session.admin === true) req.session.admin = 'owner';
   if (req.session.admin) {
-    if (req.path.startsWith('/settings') && !isOwner(req)) return res.redirect('/admin');
+    if ((req.path.startsWith('/settings') || req.path === '/backup') && !isOwner(req)) return res.redirect('/admin');
+    if (isKeeper(req) && !(req.path === '/photos' || /^\/invoices\/\d+\/photos(\/\d+\/delete)?$/.test(req.path))) return res.redirect('/admin/photos');
     return next();
   }
   res.render(req.t('admin_login'), `<div class="card" style="max-width:380px;margin:0 auto"><h1>${esc(req.t('admin_login'))}</h1>
@@ -974,13 +989,101 @@ app.post('/admin/invoices/:id/photos/:pid/delete', (req, res) => {
     db.prepare('DELETE FROM invoice_photos WHERE id = ?').run(ph.id);
     try { fs.unlinkSync(require('path').join(PHOTO_DIR, ph.file)); } catch {}
   }
-  res.redirect(`/admin/invoices/${parseInt(req.params.id, 10)}`);
+  const back = String(req.body.back || '');
+  res.redirect(back.startsWith('/admin/') ? back : `/admin/invoices/${parseInt(req.params.id, 10)}`);
 });
 
 app.post('/admin/invoices/:id/paid', (req, res) => {
   db.prepare('UPDATE invoices SET paid = ? WHERE id = ?').run(req.body.paid === '1' ? 1 : 0, parseInt(req.params.id, 10));
   res.redirect(`/admin/invoices/${parseInt(req.params.id, 10)}`);
 });
+// ---------- Фото с весов (кладовщик) ----------
+app.get('/admin/photos', (req, res) => {
+  const t = req.t; const q = String(req.query.q || '').trim().toUpperCase().replace(/^D(?=\d)/, '');
+  const like = `%${q}%`;
+  const rows = db.prepare(`SELECT i.id, i.number, i.inv_date, i.created_at, i.pieces, i.total_weight, c.code FROM invoices i JOIN clients c ON c.id = i.client_id
+    WHERE ? = '' OR i.number LIKE ? OR c.code = ? ORDER BY i.id DESC LIMIT 60`).all(q, like, q);
+  const phq = db.prepare('SELECT * FROM invoice_photos WHERE invoice_id = ? ORDER BY id'); const photos = (id) => phq.all(id);
+  const back = `/admin/photos${q ? `?q=${encodeURIComponent(q)}` : ''}`;
+  adminRender(req, res, t('a_scale_photos'), `<div class="card"><p class="muted" style="margin-top:0">${esc(t('a_scale_hint'))}</p><form class="row"><div><input name="q" value="${esc(req.query.q || '')}" placeholder="${esc(t('invoice_no'))} / ${esc(t('code'))}"></div><button>${esc(t('search'))}</button></form></div>
+  <div class="card tbl"><table><tr><th>${esc(t('date'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('places'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('inv_photos'))}</th></tr>
+  ${rows.map((i) => { const ph = photos(i.id); return `<tr><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b>${esc(i.number)}</b></td><td>${i.pieces || ''}</td><td>${num(i.total_weight)}</td>
+    <td><div class="thumbs">${ph.map((f) => `<span><a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a><form method="post" action="/admin/invoices/${i.id}/photos/${f.id}/delete" onsubmit="return confirm('${esc(t('confirm_delete_photo'))}')"><input type="hidden" name="back" value="${esc(back)}"><button class="sec sm">✕</button></form></span>`).join('')}${photoForm(t, i.id, back)}</div></td></tr>`; }).join('')}</table></div>${PHOTO_JS}`);
+});
+
+// ---------- Объявления ----------
+app.get('/admin/news', (req, res) => {
+  const t = req.t; const rows = db.prepare('SELECT * FROM news ORDER BY id DESC').all();
+  adminRender(req, res, t('a_news'), `<div class="card"><h2>${esc(t('a_news_add'))}</h2><p class="muted">${esc(t('a_news_hint'))}</p>
+    <form method="post" action="/admin/news"><label>рус</label><textarea name="text_ru" required rows="2" placeholder="Склад в Китае закрыт на Новый год с 10 по 17 февраля"></textarea>
+    <label>中文</label><textarea name="text_zh" rows="2"></textarea><label>қаз</label><textarea name="text_kk" rows="2"></textarea><p><button>${esc(t('a_news_add'))}</button></p></form></div>
+    <div class="card">${rows.length ? rows.map((n) => `<div class="row" style="align-items:center;border-bottom:1px solid var(--line);padding:8px 0"><div><span class="muted">${esc(fmtDay(n.created_at))}</span> ${esc(n.text_ru)}${n.text_zh ? `<div class="muted">${esc(n.text_zh)}</div>` : ''}${n.text_kk ? `<div class="muted">${esc(n.text_kk)}</div>` : ''}</div>
+      <form method="post" action="/admin/news/${n.id}/delete" style="flex:0 0 auto;margin:0" onsubmit="return confirm('${esc(t('confirm_delete'))}')"><button class="sec sm">${esc(t('delete'))}</button></form></div>`).join('') : `<p class="muted">${esc(t('a_news_empty'))}</p>`}</div>`);
+});
+app.post('/admin/news', (req, res) => {
+  const b = req.body; const ru = String(b.text_ru || '').trim();
+  if (ru) db.prepare('INSERT INTO news (text_ru, text_zh, text_kk) VALUES (?, ?, ?)').run(ru.slice(0, 500), String(b.text_zh || '').trim().slice(0, 500), String(b.text_kk || '').trim().slice(0, 500));
+  res.redirect('/admin/news');
+});
+app.post('/admin/news/:id/delete', (req, res) => {
+  db.prepare('DELETE FROM news WHERE id = ?').run(parseInt(req.params.id, 10));
+  res.redirect('/admin/news');
+});
+
+// ---------- Отчёт за месяц ----------
+function reportData(month) {
+  const inv = db.prepare(`SELECT i.*, c.code, c.name FROM invoices i JOIN clients c ON c.id = i.client_id
+    WHERE substr(COALESCE(NULLIF(i.inv_date, ''), i.created_at), 1, 7) = ? ORDER BY i.inv_date, i.id`).all(month);
+  const sum = (a, k) => a.reduce((s, x) => s + (Number(x[k]) || 0), 0);
+  const tot = { count: inv.length, pieces: sum(inv, 'pieces'), weight: sum(inv, 'total_weight'), volume: sum(inv, 'volume'), amount: sum(inv, 'amount') };
+  tot.paid = sum(inv.filter((i) => i.paid), 'amount'); tot.unpaid = tot.amount - tot.paid;
+  const byDest = {};
+  for (const i of inv) { const d = (DEST_RU[i.destination] || i.destination || '—'); const o = byDest[d] ||= { count: 0, weight: 0, volume: 0, amount: 0 }; o.count++; o.weight += i.total_weight || 0; o.volume += i.volume || 0; o.amount += i.amount || 0; }
+  // Долги — по всем месяцам, а не только по выбранному.
+  const debts = db.prepare(`SELECT c.code, c.name, COUNT(*) n, SUM(i.amount) s FROM invoices i JOIN clients c ON c.id = i.client_id WHERE i.paid = 0 GROUP BY c.id ORDER BY s DESC`).all();
+  return { inv, tot, byDest, debts };
+}
+const r2 = (v) => Math.round(v * 100) / 100;
+app.get('/admin/report', (req, res) => {
+  const t = req.t;
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.m || '')) ? req.query.m : new Date().toISOString().slice(0, 7);
+  const { tot, byDest, debts } = reportData(month);
+  const card = (k, v) => `<div class="card"><div class="muted">${esc(t(k))}</div><div class="stat">${v}</div></div>`;
+  adminRender(req, res, t('a_report'), `<div class="card"><form class="row" style="align-items:flex-end"><div><label>${esc(t('a_month'))}</label><input type="month" name="m" value="${month}"></div><button>${esc(t('a_show'))}</button>
+    <a class="btn sec" href="/admin/report.xlsx?m=${month}">⬇ Excel</a></form></div>
+    <div class="grid g4">${card('a_rep_invoices', tot.count)}${card('a_rep_pieces', tot.pieces)}${card('a_rep_weight', num(r2(tot.weight)) + ' кг')}${card('a_rep_volume', num(tot.volume) + ' м³')}</div>
+    <div class="grid g4">${card('a_rep_amount', money(tot.amount))}${card('a_rep_paid', money(tot.paid))}${card('a_rep_unpaid', money(tot.unpaid))}</div>
+    <div class="card tbl"><h2>${esc(t('a_rep_by_dest'))}</h2><table><tr><th>${esc(t('a_rep_dest'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('a_rep_volume'))}</th><th>${esc(t('a_rep_amount'))}</th></tr>
+    ${Object.entries(byDest).map(([d, o]) => `<tr><td>${esc(d)}</td><td>${o.count}</td><td>${num(r2(o.weight))}</td><td>${num(o.volume)}</td><td>${money(o.amount)}</td></tr>`).join('')}</table></div>
+    <div class="card tbl"><h2>${esc(t('a_rep_debts'))}</h2>${debts.length ? `<table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_rep_unpaid'))}</th></tr>
+    ${debts.map((d) => `<tr><td><b>${esc(dispCode(d.code))}</b></td><td>${esc(d.name)}</td><td>${d.n}</td><td>${money(d.s)}</td></tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_rep_no_debts'))}</p>`}</div>`);
+});
+app.get('/admin/report.xlsx', (req, res) => {
+  const t = req.t;
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.m || '')) ? req.query.m : new Date().toISOString().slice(0, 7);
+  const { inv, tot, byDest, debts } = reportData(month);
+  const wb = XLSX.utils.book_new();
+  const sheet = (rows, widths) => { const ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = widths.map((w) => ({ wch: w })); return ws; };
+  XLSX.utils.book_append_sheet(wb, sheet([[t('a_report'), month], [],
+    [t('a_rep_invoices'), tot.count], [t('a_rep_pieces'), tot.pieces], [t('a_rep_weight'), r2(tot.weight)], [t('a_rep_volume'), r2(tot.volume * 1000) / 1000],
+    [t('a_rep_amount'), r2(tot.amount)], [t('a_rep_paid'), r2(tot.paid)], [t('a_rep_unpaid'), r2(tot.unpaid)], [],
+    [t('a_rep_dest'), t('a_rep_invoices'), t('weight'), t('a_rep_volume'), t('a_rep_amount')],
+    ...Object.entries(byDest).map(([d, o]) => [d, o.count, r2(o.weight), r2(o.volume * 1000) / 1000, r2(o.amount)])], [24, 14, 12, 12, 14]), t('a_rep_sheet_total').slice(0, 31));
+  XLSX.utils.book_append_sheet(wb, sheet([[t('date'), t('invoice_no'), t('code'), t('name'), t('a_rep_dest'), t('places'), t('weight'), t('a_rep_volume'), t('a_rep_amount'), t('a_rep_paid')],
+    ...inv.map((i) => [fmtDay(i.inv_date || i.created_at), i.number, dispCode(i.code), i.name, DEST_RU[i.destination] || i.destination, i.pieces || 0, i.total_weight || 0, i.volume || 0, r2(i.amount || 0), i.paid ? '✓' : ''])], [11, 18, 9, 20, 14, 7, 9, 9, 11, 8]), t('a_invoices').slice(0, 31));
+  XLSX.utils.book_append_sheet(wb, sheet([[t('code'), t('name'), t('a_rep_invoices'), t('a_rep_unpaid')], ...debts.map((d) => [dispCode(d.code), d.name, d.n, r2(d.s)])], [10, 24, 10, 14]), t('a_rep_debts').slice(0, 31));
+  res.setHeader('Content-Disposition', `attachment; filename="cargo151-report-${month}.xlsx"`);
+  res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+});
+
+// ---------- Резервная копия (владелец) ----------
+// Свежая копия базы одним файлом: клиенты, накладные, настройки. Фото сохраняются ночным бэкапом на сервере.
+app.get('/admin/backup', (req, res) => {
+  const tmp = require('path').join(require('os').tmpdir(), `cargo151-${Date.now()}.db`);
+  db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+  res.download(tmp, `cargo151-${new Date().toISOString().slice(0, 10)}.db`, () => fs.unlink(tmp, () => {}));
+});
+
 app.get('/admin/settings', (req, res) => {
   const t = req.t;
   const whs = db.prepare('SELECT * FROM warehouses ORDER BY id').all();
@@ -1000,6 +1103,7 @@ app.get('/admin/settings', (req, res) => {
     <div><label>${esc(t('active'))}</label><select name="wh_${w.id}_active"><option value="1" ${w.active ? 'selected' : ''}>✓</option><option value="0" ${w.active ? '' : 'selected'}>✗</option></select></div></div></div>`;
   adminRender(req, res, t('a_settings'), `<form method="post" action="/admin/settings">
     <div class="card"><h2>${esc(t('s_warehouses'))}</h2>${whs.map(whForm).join('')}${whForm({ id: 'new', name_ru: '', name_zh: '', receiver: '', phone: '', address: '', mark_template: 'D{code}-{last4}', name_template: '{mark}', hours_ru: 'Ежедневно, без выходных, 09:00–20:00', hours_zh: '每天营业，无休息日，09:00–20:00', note_ru: '', note_zh: '', active: 1 }).replace('<div class="card" style="background:#fafafa">', `<div class="card" style="background:#fafafa"><h3>${esc(t('add_wh'))}</h3>`)}</div>
+    <div class="card"><h2>💾 ${esc(t('a_backup'))}</h2><p class="muted">${esc(t('a_backup_hint'))}</p><a class="btn sec" href="/admin/backup">⬇ ${esc(t('a_backup'))}</a></div>
     <div class="card"><h2>${esc(t('s_notice'))}</h2>
       <label>рус</label><input name="notice_ru" value="${esc(setting('notice_ru'))}"><label>中文</label><input name="notice_zh" value="${esc(setting('notice_zh'))}"></div>
     ${['services', 'about'].map((k) => `<div class="card"><h2>${esc(t('nav_' + k))}</h2><p class="muted">${esc(t('s_info_hint'))}</p>
@@ -1041,4 +1145,4 @@ app.post('/admin/settings', (req, res) => {
   res.redirect('/admin/settings');
 });
 
-app.listen(PORT, () => console.log(`Cargo 151: http://localhost:${PORT}  (owner: ${process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD' : 'admin151'}, accountant: ${process.env.ACCOUNTANT_PASSWORD ? 'ACCOUNTANT_PASSWORD' : 'buh151'})`));
+app.listen(PORT, () => console.log(`Cargo 151: http://localhost:${PORT}  (owner: ${process.env.ADMIN_PASSWORD ? 'ADMIN_PASSWORD' : 'admin151'}, accountant: ${process.env.ACCOUNTANT_PASSWORD ? 'ACCOUNTANT_PASSWORD' : 'buh151'}, keeper: ${process.env.KEEPER_PASSWORD ? 'KEEPER_PASSWORD' : 'sklad151'})`));

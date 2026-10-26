@@ -55,12 +55,13 @@ footer{max-width:1100px;margin:0 auto;padding:8px max(16px,env(safe-area-inset-l
 @keyframes flow{to{stroke-dashoffset:-32}}
 .pulse{fill:var(--brand);opacity:.25;transform-box:fill-box;transform-origin:center;animation:pulse 2.4s ease-out infinite}
 @keyframes pulse{0%{transform:scale(.6);opacity:.45}100%{transform:scale(2.4);opacity:0}}
-.truck{animation:drive 14s linear infinite}
+.truck{animation:drive 14s linear infinite}.air{animation:fly 11s linear infinite}@keyframes fly{from{transform:translateX(0)}to{transform:translateX(-1000px)}}
+.hero .modes{display:flex;gap:8px;padding:10px 18px 0;flex-wrap:wrap}.hero .modes span{background:#fff;border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:14px;font-weight:700;color:var(--ink)}
 @keyframes drive{from{transform:translateX(-160px)}to{transform:translateX(960px)}}
 button.copied,.btn.copied{background:var(--ok)!important;color:#fff!important;transition:background .2s}
 .code.landed{animation:land .35s ease-out}@keyframes land{0%{transform:scale(1.12)}100%{transform:scale(1)}}
 .hero .route,.hero .glow{transition:opacity .3s,stroke-width .3s}.hero.sel .route:not(.hl),.hero.sel .glow:not(.hl){opacity:.15}.hero .route.hl{stroke-width:4}.hero .glow.hl{opacity:.3}
-.hero .city text{transition:font-size .3s}.hero .city.hl text{font-size:24px;fill:var(--brand)}.hero .city.hl .pulse{animation-duration:1s}
+.hero .city text{transition:font-size .3s}.hero .city.hl text:not(.sub){font-size:24px;fill:var(--brand)}.hero .city.hl .pulse{animation-duration:1s}
 .prog{position:relative;padding-top:24px;margin:6px 0 4px;min-width:220px}.prog .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
 .prog .bar i{display:block;height:100%;width:var(--p);background:var(--brand);border-radius:3px;animation:grow 1.4s cubic-bezier(.2,.7,.3,1)}
 .prog .ptruck{position:absolute;top:2px;left:clamp(0px,calc(var(--p) - 26px),calc(100% - 26px));animation:drive-in 1.4s cubic-bezier(.2,.7,.3,1);line-height:0}
@@ -72,7 +73,7 @@ button.copied,.btn.copied{background:var(--ok)!important;color:#fff!important;tr
 .fade>*{animation:fadeUp .5s ease-out both}.fade>*:nth-child(2){animation-delay:.08s}.fade>*:nth-child(3){animation-delay:.16s}.fade>*:nth-child(4){animation-delay:.24s}.fade>*:nth-child(n+5){animation-delay:.3s}
 .fade .card>h2{animation:fadeUp .5s ease-out both}
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){.route.flow,.pulse,.truck,.prog .bar i,.prog .ptruck,.fade>*,.fade .card>h2,.code.landed{animation:none}.mover{display:none}}
+@media (prefers-reduced-motion:reduce){.route.flow,.pulse,.truck,.prog .bar i,.prog .ptruck,.fade>*,.fade .card>h2,.code.landed{animation:none}.mover{display:none}.air{display:none}}
 @media (max-width:720px){header .in{gap:8px 12px}header nav{order:3;flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;gap:16px;padding-bottom:4px;scrollbar-width:none}header nav a{white-space:nowrap}.lang{margin-left:auto}}
 .wa-fab{position:fixed;right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;gap:8px;background:#25d366;color:#fff;font-weight:700;padding:10px 16px 10px 12px;border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.18);z-index:15}.wa-fab:hover{text-decoration:none;background:#1ebe5a}
 @media (max-width:720px){.wa-fab span{display:none}.wa-fab{padding:12px}}
@@ -93,6 +94,8 @@ body{padding-bottom:72px}
 .invlist{display:grid;gap:10px}.inv{border:1px solid var(--line,#eee);border-radius:12px;padding:12px 14px}.inv .badge{margin-right:4px}
 .cnt{display:inline-block;min-width:20px;padding:0 6px;border-radius:10px;background:var(--brand);color:#fff;font-size:12px;line-height:20px;text-align:center}
 .prow{display:flex;gap:12px;align-items:center}.prow>div{flex:1;min-width:0}
+.news{border-left:4px solid var(--brand)}.news h2{margin-bottom:6px}.news-i{padding:6px 0;border-top:1px solid var(--line)}.news-i:first-of-type{border-top:0}
+.thumbs{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.thumbs span{position:relative}.thumbs img{width:56px;height:56px;object-fit:cover;border-radius:6px;display:block}.thumbs span form{position:absolute;top:-6px;right:-6px;margin:0}.thumbs span button{padding:0 6px;font-size:12px;line-height:18px}
 .promo{display:flex;align-items:center;gap:12px;background:linear-gradient(90deg,#fff1f1,#fff);border:1px solid #f6c9cb;border-left:4px solid var(--brand);border-radius:12px;padding:12px 14px;margin:0 0 16px}
 .promo-ic{flex:0 0 40px;height:40px;border-radius:50%;background:var(--brand);color:#fff;font-weight:800;font-size:20px;display:flex;align-items:center;justify-content:center}
 .promo-tx{flex:1;min-width:0;font-size:14px;line-height:1.35}.promo-tx b{display:block;font-size:15px;margin-bottom:2px}.promo-tx span{color:#6b5b5c}
@@ -127,20 +130,23 @@ function page({ title, body, t, lang, path, session, whatsapp }) {
   const nav = navItems.map(([href, k]) => `<a href="${href}" class="${isOn(href) ? 'on' : ''}">${esc(t(k))}</a>`).join('');
   const logout = session && (session.clientId || session.admin) ? `<a href="/logout">${esc(t('nav_logout'))}</a>` : '';
   const back = encodeURIComponent(path);
-  return `<!doctype html><html lang="${lang === 'zh' ? 'zh-CN' : 'ru'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  return `<!doctype html><html lang="${lang === 'zh' ? 'zh-CN' : lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · ${esc(t('brand'))}</title><style>${CSS}</style></head><body>
 <header><div class="in"><a class="logo" href="/"><img src="/logo.png" alt="Cargo 151" width="96" height="45"></a><nav>${nav}${logout}</nav>
-<div class="lang"><a href="/lang/ru?back=${back}" class="${lang === 'ru' ? 'on' : ''}">RU</a><a href="/lang/zh?back=${back}" class="${lang === 'zh' ? 'on' : ''}">中文</a></div></div></header>
+<div class="lang"><a href="/lang/ru?back=${back}" class="${lang === 'ru' ? 'on' : ''}">RU</a><a href="/lang/kk?back=${back}" class="${lang === 'kk' ? 'on' : ''}">ҚАЗ</a><a href="/lang/zh?back=${back}" class="${lang === 'zh' ? 'on' : ''}">中文</a></div></div></header>
 <main>${body}</main><footer>${wa ? `<a href="https://wa.me/${wa}" target="_blank" rel="noopener">WhatsApp ${esc(waPretty)}</a> · ` : ''}<a href="https://www.instagram.com/cargo.151" target="_blank" rel="noopener">Instagram @cargo.151</a> · <a href="/admin">${esc(t('nav_admin'))}</a></footer>${wa ? `<a class="wa-fab noprint" href="https://wa.me/${wa}" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path fill="#fff" d="M16 3a13 13 0 0 0-11.2 19.6L3 29l6.6-1.7A13 13 0 1 0 16 3zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.9 1 1-3.8-.3-.4A10.6 10.6 0 1 1 16 26.6zm5.8-7.9c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1a8.7 8.7 0 0 1-4.3-3.8c-.3-.6.3-.5 1-1.7.1-.2 0-.4 0-.5l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6a1.2 1.2 0 0 0-.9.4 3.7 3.7 0 0 0-1.1 2.7 6.4 6.4 0 0 0 1.3 3.4 14.7 14.7 0 0 0 5.7 5c2.1.9 2.9 1 4 .8a3.4 3.4 0 0 0 2.2-1.6 2.8 2.8 0 0 0 .2-1.6c-.1-.1-.3-.2-.6-.4z"/></svg><span>${esc(t('write_wa'))}</span></a>` : ''}<script>${JS}</script></body></html>`;
 }
 
 // Схематичная карта маршрутов: склады в Китае → города выдачи, с бегущими точками и фурой.
 function heroMap(t, lang) {
+  // Направления — страны целиком: возим по всему Казахстану, Кыргызстану и России, не только в три города.
+  const L = (ru, kk, zh) => (lang === 'zh' ? zh : lang === 'kk' ? kk : ru);
   const P = {
-    gz: [600, 300, lang === 'zh' ? '广州' : 'Гуанчжоу'], yw: [660, 215, lang === 'zh' ? '义乌' : 'Иу'],
-    ala: [350, 165, lang === 'zh' ? '阿拉木图' : 'Алматы'], bsk: [290, 215, lang === 'zh' ? '比什凯克' : 'Бишкек'],
-    msk: [60, 90, lang === 'zh' ? '莫斯科' : 'Москва'],
+    gz: [600, 300, L('Гуанчжоу', 'Гуанчжоу', '广州')], yw: [660, 215, L('Иу', 'Иу', '义乌')],
+    ala: [360, 150, L('Казахстан', 'Қазақстан', '哈萨克斯坦')], bsk: [270, 240, L('Кыргызстан', 'Қырғызстан', '吉尔吉斯斯坦')],
+    msk: [80, 95, L('Россия', 'Ресей', '俄罗斯')],
   };
+  const whole = L('по всей стране', 'бүкіл ел бойынша', '全境配送');
   const RU = { ala: 'Алматы', bsk: 'Бишкек', msk: 'Москва' }; // как в списке складов выдачи
   const routes = [['gz', 'ala', -40], ['yw', 'ala', -30], ['gz', 'bsk', 30], ['yw', 'msk', -50], ['gz', 'msk', -30]];
   const path = ([a, b, bend]) => {
@@ -154,7 +160,9 @@ function heroMap(t, lang) {
     const hub = k === 'gz' || k === 'yw';
     return `<g class="city" data-key="${k}" data-city="${RU[k] || ''}"><circle cx="${x}" cy="${y}" r="${hub ? 9 : 6}" class="pulse" style="animation-delay:-${(x % 7) / 3}s"/>
       <circle cx="${x}" cy="${y}" r="${hub ? 6 : 4.5}" fill="${hub ? '#e5262d' : '#fff'}" stroke="#e5262d" stroke-width="2.5"/>
-      <text x="${x + (hub ? 14 : 11)}" y="${y + 6}" font-size="${hub ? 22 : 18}" font-weight="${hub ? 800 : 600}" fill="#22191a">${esc(name)}</text></g>`;
+      ${hub ? '' : `<circle cx="${x}" cy="${y}" r="34" fill="#e5262d" opacity=".07"/>`}
+      <text x="${x + (hub ? 14 : 11)}" y="${y + 6}" font-size="${hub ? 22 : 20}" font-weight="${hub ? 800 : 800}" fill="#22191a">${esc(name)}</text>
+      ${hub ? '' : `<text class="sub" x="${x + 11}" y="${y + 24}" font-size="13" font-weight="600" fill="#e5262d">${esc(whole)}</text>`}</g>`;
   }).join('');
   const dots = `<pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" fill="#e8caca"/></pattern>`;
   const truck = `<g class="truck"><g transform="translate(0,352)">
@@ -162,8 +170,15 @@ function heroMap(t, lang) {
     <path d="M94,8 h18 l12,12 v14 h-30 z" fill="#b8161c"/><rect x="100" y="11" width="10" height="8" fill="#ffe3e3"/>
     <circle cx="20" cy="38" r="7" fill="#22191a"/><circle cx="70" cy="38" r="7" fill="#22191a"/><circle cx="110" cy="38" r="7" fill="#22191a"/>
     <circle cx="20" cy="38" r="2.5" fill="#fff"/><circle cx="70" cy="38" r="2.5" fill="#fff"/><circle cx="110" cy="38" r="2.5" fill="#fff"/></g></g>`;
-  return `<div class="hero" aria-hidden="true"><div class="tag">${t('hero_tag')}</div><svg viewBox="0 30 800 370" role="img"><defs>${dots}</defs>
-    <rect width="800" height="400" fill="url(#dots)"/>${lines}${movers}${plane}${cities}
+  // Самолёт летит из Китая на запад: у нас и авто-, и авиадоставка.
+  const air = `<g class="air"><g transform="translate(820,58)">
+    <path d="M100,-1 H170" stroke="#e5262d" stroke-width="2" stroke-dasharray="4 6" opacity=".45"/>
+    <path d="M0,0 C6,-6 14,-8 24,-8 H64 L76,-24 H84 L79,-8 H90 Q96,-8 96,-1 Q96,5 90,5 H24 C14,5 6,3 0,0Z" fill="#e5262d"/>
+    <path d="M36,-1 H54 L68,22 H58 Z" fill="#b8161c"/>
+    <circle cx="16" cy="-3" r="2.2" fill="#ffe3e3"/><circle cx="26" cy="-4" r="1.8" fill="#fff"/><circle cx="34" cy="-4" r="1.8" fill="#fff"/><circle cx="42" cy="-4" r="1.8" fill="#fff"/></g></g>`;
+  const modes = `<div class="modes"><span>🚛 ${esc(t('mode_auto'))}</span><span>✈️ ${esc(t('mode_air'))}</span></div>`;
+  return `<div class="hero" aria-hidden="true"><div class="tag">${t('hero_tag')}</div>${modes}<svg viewBox="0 30 800 370" role="img"><defs>${dots}</defs>
+    <rect width="800" height="400" fill="url(#dots)"/>${lines}${movers}${plane}${cities}${air}
     <rect x="0" y="392" width="800" height="8" fill="#22191a" opacity=".85"/><path d="M0,396 H800" stroke="#fff" stroke-width="1.5" stroke-dasharray="18 14"/>${truck}</svg>
     </div>`;
 }
