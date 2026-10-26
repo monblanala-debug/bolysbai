@@ -310,7 +310,8 @@ function invoicePage(req, inv) {
   return `<div class="row noprint" style="align-items:center;margin-bottom:12px"><a href="${req.session.admin ? '/admin/invoices' : '/cabinet'}">← ${esc(t('back'))}</a>
     <span style="margin-left:auto">${inv.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</span>
     <button type="button" class="sec" onclick="print()" style="flex:0 0 auto">${esc(t('print'))}</button></div>
-  <div class="wb">
+  <p class="muted only-m noprint" style="font-size:13px;margin:0 0 8px">${esc(t('inv_zoom_hint'))}</p>
+  <div class="wb-fit"><div class="wb wb-sheet">
     <div class="wb-top"><img src="/logo.png" alt="Карго 151"><div><div class="co">${esc(setting('invoice_company'))}</div><div class="ti">${esc(setting('invoice_title'))}</div></div></div>
     <div class="g head">${INV_HEAD.map(cell).join('')}</div>
     <div class="g goods">${INV_GOODS.map(cell).join('')}</div>
@@ -318,10 +319,14 @@ function invoicePage(req, inv) {
       <div class="c"><div class="l">总计<br>Сумма</div><div class="v big">${esc(money(inv.amount))}</div></div></div>
     ${inv.cargo_status ? `<div class="wb-tracks"><b>运踪 · ${esc(t('inv_cargo_status'))}:</b> ${esc(cargoStatus(t, inv.cargo_status))}</div>` : ''}
     ${parcels.length ? `<div class="wb-tracks"><b>${esc(t('track'))}:</b> ${parcels.map((p) => esc(p.track)).join(', ')}</div>` : ''}
-    <div class="wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
+  </div></div>
+  <div class="wb wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
       ${rules.map((l, i) => (i === 0 && !/^\d/.test(l) ? `<p><b>${esc(l)}</b></p>` : `<p>${esc(l)}</p>`)).join('')}</div>
-  </div>
-  <p class="muted" style="font-size:13px">${esc(t('inv_rules_agree'))}</p>`;
+  <p class="muted" style="font-size:13px">${esc(t('inv_rules_agree'))}</p>
+  <style>@page{size:A4 landscape;margin:10mm}</style>
+  <script>// Накладная всегда как бумажный лист в альбомной ориентации: на узком экране уменьшаем её целиком.
+  (function(){const fit=()=>document.querySelectorAll('.wb-fit').forEach((w)=>{const s=w.firstElementChild;s.style.transform='';const k=Math.min(1,w.clientWidth/s.offsetWidth);s.style.transform='scale('+k+')';w.style.height=s.offsetHeight*k+'px'});
+  fit();addEventListener('resize',fit);addEventListener('load',fit);addEventListener('beforeprint',fit);addEventListener('afterprint',fit)})();</script>`;
 }
 
 app.get('/invoice/:id', (req, res) => {
