@@ -74,7 +74,7 @@ button.copied,.btn.copied{background:var(--ok)!important;color:#fff!important;tr
 .fade .card>h2{animation:fadeUp .5s ease-out both}
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.route.flow,.pulse,.truck,.prog .bar i,.prog .ptruck,.fade>*,.fade .card>h2,.code.landed{animation:none}.mover{display:none}.air{display:none}}
-@media (max-width:720px){header .in{gap:8px 12px}header nav{order:3;flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;gap:16px;padding-bottom:4px;scrollbar-width:none}header nav a{white-space:nowrap}.lang{margin-left:auto}}
+@media (max-width:720px){header .in{gap:8px 12px}header nav{order:3;flex:1 0 100%;flex-wrap:wrap;gap:6px;padding-bottom:4px}header nav a{white-space:nowrap;padding:6px 10px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:14px}header nav a.on{background:var(--brand);border-color:var(--brand);color:#fff}.lang{margin-left:auto}}
 .wa-fab{position:fixed;right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;gap:8px;background:#25d366;color:#fff;font-weight:700;padding:10px 16px 10px 12px;border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.18);z-index:15}.wa-fab:hover{text-decoration:none;background:#1ebe5a}
 @media (max-width:720px){.wa-fab span{display:none}.wa-fab{padding:12px}}
 body{padding-bottom:72px}
