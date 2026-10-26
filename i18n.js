@@ -3,7 +3,7 @@ const T = {
   ru: {
     brand: 'Карго 151',
     hero_tag: 'Из Гуанчжоу и Иу <span>в Алматы, Астану, Бишкек и Москву</span>',
-    write_wa: 'Написать в WhatsApp',
+    write_wa: 'Написать в WhatsApp', keepers: 'Вопросы по складу — звоните кладовщику:',
     step1: 'Получить код', step2: 'Ваш код', step3: 'Адрес склада',
     phone_hint: 'Укажите номер WhatsApp. По нему мы свяжемся с вами: пришлём фото груза и сообщим, когда он прибудет на склад.',
     your_code_is: 'ваш код', copy_code: 'Скопировать код', next_address: 'Далее: адрес склада →',
@@ -57,7 +57,7 @@ const T = {
   zh: {
     brand: '151 货运',
     hero_tag: '从广州、义乌 <span>发往阿拉木图、阿斯塔纳、比什凯克和莫斯科</span>',
-    write_wa: 'WhatsApp 咨询',
+    write_wa: 'WhatsApp 咨询', keepers: '仓库问题请联系仓管：',
     step1: '注册', step2: '您的编码', step3: '仓库地址',
     phone_hint: '请填写 WhatsApp 号码。我们将通过它联系您：发送货物照片，并在货物到仓时通知您。',
     your_code_is: '您的编码', copy_code: '复制编码', next_address: '下一步：仓库地址 →',

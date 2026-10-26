@@ -71,8 +71,8 @@ for (const [table, col, def] of [
   ['warehouses', 'name_template', "TEXT NOT NULL DEFAULT '{mark}'"],
   ['warehouses', 'note_ru', "TEXT DEFAULT ''"],
   ['warehouses', 'note_zh', "TEXT DEFAULT ''"],
-  ['warehouses', 'hours_ru', "TEXT DEFAULT 'Ежедневно, без выходных'"],
-  ['warehouses', 'hours_zh', "TEXT DEFAULT '每天营业，无休息日'"],
+  ['warehouses', 'hours_ru', "TEXT DEFAULT 'Ежедневно, без выходных, 09:00–20:00'"],
+  ['warehouses', 'hours_zh', "TEXT DEFAULT '每天营业，无休息日，09:00–20:00'"],
 ]) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
@@ -99,9 +99,9 @@ function seed() {
   for (const [name, prefix] of cities) ins.run(name, prefix, `${name}, адрес пункта выдачи (заполните в админке)`);
   const wh = db.prepare('INSERT INTO warehouses (name_ru, name_zh, receiver, phone, address, note_ru, note_zh) VALUES (?, ?, ?, ?, ?, ?, ?)');
   wh.run('Гуанчжоу', '广州', '乌莉亚', '18038711151', '广东省佛山市南海区里水镇广物汽贸广佛汽车城B区B07-1号151库房',
-    'Принимаем все посылки, в том числе мелкие', '接收所有包裹，包括小件');
+    '', '');
   wh.run('Иу', '义乌', '乌丽亚娜', '18606567151', '浙江省金华市义乌市后宅街道群英路2号，恒泰胶带厂院内151库',
-    'Только крупные грузы. Мелкие посылки принимаются только в Гуанчжоу', '仅接收大件货物，小件包裹请寄广州仓');
+    '', '');
   const set = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
   set.run('rate_per_kg', '4');
   set.run('code_start', '1600');
@@ -127,7 +127,6 @@ function seed() {
 - Деревянная обрешётка для хрупкого
 
 # Советы
-- Мелкие посылки отправляйте только на склад в Гуанчжоу.
 - Не удаляйте маркировку из адреса — без неё склад не узнает, чья посылка.
 - Хрупкие товары просите продавца упаковать надёжнее.
 - Сохраняйте трек-номер из заказа, по нему мы ищем посылку.`);
@@ -192,7 +191,6 @@ function seed() {
 - 易碎品打木架
 
 # 小贴士
-- 小件包裹只能寄到广州仓。
 - 请勿删除地址中的唛头，否则仓库无法识别包裹。
 - 易碎品请让商家加固包装。
 - 请保存订单中的快递单号，我们凭单号查找包裹。`);

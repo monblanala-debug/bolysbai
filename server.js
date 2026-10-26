@@ -145,6 +145,12 @@ app.post('/find', (req, res) => {
   res.redirect('/address');
 });
 
+// Телефоны складов внизу страницы — для вопросов клиентов.
+function keepers(req, whs) {
+  const fmt = (p) => { const d = String(p).replace(/\D/g, ''); return d.length === 11 ? `+86 ${d.slice(0, 3)} ${d.slice(3, 7)} ${d.slice(7)}` : p; };
+  return `<div class="keepers"><b>${esc(req.t('keepers'))}</b>${whs.map((w) => `<div>${esc(whName(req.lang, w))}: ${esc(w.receiver)} <span class="val">${esc(fmt(w.phone))}</span></div>`).join('')}</div>`;
+}
+
 // Старая ссылка на отдельную страницу кода — теперь код показан на странице склада.
 app.get('/code', (req, res) => res.redirect('/address'));
 
@@ -169,8 +175,8 @@ app.get('/address', (req, res) => {
   const hours = (x) => (req.lang === 'zh' ? x.hours_zh : x.hours_ru);
   if (!w) {
     return res.render(t('choose_wh'), `<div class="narrow">${steps(t, 2)}${codeBanner(req, client)}<div class="card"><h1>${esc(t('choose_wh'))}</h1>
-      <div class="wh-list">${whs.map((x) => `<a class="wh" href="/address?wh=${x.id}"><b>${esc(whName(req.lang, x))}</b><span>${esc(note(x))}</span><span class="muted">🕘 ${esc(hours(x))}</span></a>`).join('')}</div>
-      ${notice(req)}
+      <div class="wh-list">${whs.map((x) => `<a class="wh" href="/address?wh=${x.id}"><b>${esc(whName(req.lang, x))}</b>${note(x) ? `<span>${esc(note(x))}</span>` : ''}<span class="muted">🕘 ${esc(hours(x))}</span></a>`).join('')}</div>
+      ${notice(req)}${keepers(req, whs)}
       </div></div>`);
   }
   const f = addressFields(w, client);
@@ -186,6 +192,7 @@ app.get('/address', (req, res) => {
     <h3>${esc(t('by_fields'))}</h3>
     ${row('f-n', t('receiver'), f.name)}${row('f-p', t('receiver_phone'), f.phone)}${row('f-a', t('address'), f.address)}
     <p class="muted">${esc(t('rules'))}</p>
+    ${keepers(req, whs)}
     </div>
     <div class="card"><h3>${esc(t('pickup'))}${client.city_name ? ' · ' + esc(client.city_name) : ''}</h3>
       <div class="addr">${esc(client.pickup_address || '—')}</div>
@@ -520,7 +527,7 @@ app.get('/admin/settings', (req, res) => {
     <div><label>${esc(t('name_tpl'))} ({mark}, {receiver})</label><input name="wh_${w.id}_name_template" value="${esc(w.name_template)}"></div>
     <div><label>${esc(t('active'))}</label><select name="wh_${w.id}_active"><option value="1" ${w.active ? 'selected' : ''}>✓</option><option value="0" ${w.active ? '' : 'selected'}>✗</option></select></div></div></div>`;
   adminRender(req, res, t('a_settings'), `<form method="post" action="/admin/settings">
-    <div class="card"><h2>${esc(t('s_warehouses'))}</h2>${whs.map(whForm).join('')}${whForm({ id: 'new', name_ru: '', name_zh: '', receiver: '', phone: '', address: '', mark_template: 'D{code}-{last4}', name_template: '{mark}', hours_ru: 'Ежедневно, без выходных', hours_zh: '每天营业，无休息日', note_ru: '', note_zh: '', active: 1 }).replace('<div class="card" style="background:#fafafa">', `<div class="card" style="background:#fafafa"><h3>${esc(t('add_wh'))}</h3>`)}</div>
+    <div class="card"><h2>${esc(t('s_warehouses'))}</h2>${whs.map(whForm).join('')}${whForm({ id: 'new', name_ru: '', name_zh: '', receiver: '', phone: '', address: '', mark_template: 'D{code}-{last4}', name_template: '{mark}', hours_ru: 'Ежедневно, без выходных, 09:00–20:00', hours_zh: '每天营业，无休息日，09:00–20:00', note_ru: '', note_zh: '', active: 1 }).replace('<div class="card" style="background:#fafafa">', `<div class="card" style="background:#fafafa"><h3>${esc(t('add_wh'))}</h3>`)}</div>
     <div class="card"><h2>${esc(t('s_notice'))}</h2>
       <label>рус</label><input name="notice_ru" value="${esc(setting('notice_ru'))}"><label>中文</label><input name="notice_zh" value="${esc(setting('notice_zh'))}"></div>
     ${['services', 'about'].map((k) => `<div class="card"><h2>${esc(t('nav_' + k))}</h2><p class="muted">${esc(t('s_info_hint'))}</p>
