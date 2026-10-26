@@ -117,7 +117,9 @@ for (const [path, key] of [['/about', 'about'], ['/services', 'services']]) {
 app.get('/', (req, res) => {
   const t = req.t;
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
-  res.render(t('nav_home'), `<div class="narrow">${steps(t, 1)}<div class="card">
+  res.render(t('nav_home'), `<div class="narrow"><div class="card login-top"><b>${esc(t('have_code'))}</b>
+      <form method="post" action="/find" class="row" style="margin-top:8px"><div><input name="phone" type="tel" required placeholder="+7 777 123 45 67" autocomplete="tel"></div><button class="sec">${esc(t('login_btn'))}</button></form></div>
+    ${steps(t, 1)}<div class="card">
     <h1>${esc(t('hero_title'))}</h1><p class="muted">${esc(t('hero_sub'))}</p>
     <form method="post" action="/register">
       <label for="f-name">${esc(t('name'))}</label><input id="f-name" name="name" required maxlength="80" autocomplete="name">
@@ -128,9 +130,7 @@ app.get('/', (req, res) => {
       <div class="hint">${esc(t('city_hint'))}</div>
       <button class="wide">${esc(t('get_code'))}</button>
     </form></div>
-    <div class="card"><h3>${esc(t('have_code'))}</h3>
-      <form method="post" action="/find" class="row"><div><input name="phone" type="tel" required placeholder="${esc(t('phone'))}"></div><button class="sec">${esc(t('find_by_phone'))}</button></form>
-    </div></div>${heroMap(t, req.lang)}`);
+</div>${heroMap(t, req.lang)}`);
 });
 
 app.post('/register', (req, res) => {
@@ -156,7 +156,7 @@ app.post('/find', (req, res) => {
   const c = db.prepare('SELECT id FROM clients WHERE phone = ?').get(normPhone(req.body.phone));
   if (!c) return res.render(req.t('find_title'), `<div class="narrow card"><div class="alert err">${esc(req.t('not_found'))}</div><a class="btn" href="/">${esc(req.t('get_code'))}</a></div>`);
   req.session.clientId = c.id;
-  res.redirect('/address');
+  res.redirect('/cabinet');
 });
 
 // Телефоны складов внизу страницы — для вопросов клиентов.
@@ -290,8 +290,8 @@ app.get('/cabinet', (req, res) => {
   if (!client) {
     return res.render(t('login_title'), `<div class="card" style="max-width:420px;margin:0 auto"><h1>${esc(t('login_title'))}</h1><p class="muted">${esc(t('login_hint'))}</p>
       ${req.query.err ? `<div class="alert err">${esc(t('login_error'))}</div>` : ''}
-      <form method="post" action="/cabinet/login"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required>
-      <label>${esc(t('code'))}</label><input name="code" required><p><button>${esc(t('login_btn'))}</button></p></form>
+      <form method="post" action="/cabinet/login"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required placeholder="+7 777 123 45 67" autocomplete="tel">
+      <p><button>${esc(t('login_btn'))}</button></p></form>
       <a href="/">${esc(t('get_code'))}</a></div>`);
   }
   const invoices = db.prepare('SELECT * FROM invoices WHERE client_id = ? ORDER BY id DESC').all(client.id);
@@ -310,8 +310,8 @@ app.get('/cabinet', (req, res) => {
 
 app.post('/cabinet/login', (req, res) => {
   // Принимаем и «1600», и «D1600», и «D1600-4567».
-  const code = String(req.body.code || '').trim().toUpperCase().replace(/^D/, '').replace(/-\d{4}$/, '');
-  const c = db.prepare('SELECT id FROM clients WHERE phone = ? AND code = ?').get(normPhone(req.body.phone), code);
+  // Вход только по номеру WhatsApp: код клиенту помнить не нужно, он увидит его в кабинете.
+  const c = db.prepare('SELECT id FROM clients WHERE phone = ?').get(normPhone(req.body.phone));
   if (!c) return res.redirect('/cabinet?err=1');
   req.session.clientId = c.id;
   res.redirect('/cabinet');
@@ -433,8 +433,63 @@ app.get('/admin/clients', (req, res) => {
     <form method="post" action="/admin/clients/add" class="row"><div><label>${esc(t('code'))}</label><input name="code" required value="${esc(req.query.code || '')}" placeholder="D185"></div>
     <div><label>${esc(t('name'))}</label><input name="name" required></div><div><label>WhatsApp</label><input name="phone" type="tel" required></div>
     <div><label>${esc(t('city'))}</label><select name="city_id">${cities.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><button>${esc(t('add'))}</button></form></details>
+  ${owner ? `<details class="card"><summary><b>${esc(t('a_clients_import'))}</b></summary><p class="muted">${esc(t('a_clients_import_hint'))}</p>
+    <form method="post" action="/admin/clients/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div><button>${esc(t('a_upload'))}</button></form></details>` : ''}
   <div class="card tbl"><table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('city'))}</th><th>${esc(t('parcels_count'))}</th><th>${esc(t('registered'))}</th></tr>
-  ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(r.code)}</b></a></td><td>${esc(r.name)}</td>${owner ? `<td>${isStub(r) ? `<a href="/admin/clients?code=${encodeURIComponent(dispCode(r.code))}#add" class="badge b-border">${esc(t('a_no_phone'))}</a>` : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td><td>${esc(fmtDate(r.created_at))}</td></tr>`).join('')}</table></div>`);
+  ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(dispCode(r.code))}</b></a></td><td>${esc(r.name)}</td>${owner ? `<td>${isStub(r) ? `<a href="/admin/clients?code=${encodeURIComponent(dispCode(r.code))}#add" class="badge b-border">${esc(t('a_no_phone'))}</a>` : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td><td>${esc(fmtDate(r.created_at))}</td></tr>`).join('')}</table></div>`);
+});
+
+// ---------- База клиентов из Excel (только владелец: там телефоны) ----------
+// Колонки по заголовкам «Код / Имя / Телефон / Город»; без заголовков — угадываем: код вида D15, Y7, X100; телефон — 10+ цифр.
+const CLIENT_COLS = { code: ['код', 'код клиента', 'code', '编码', '客户编码', '唛头'], name: ['имя', 'фио', 'клиент', 'name', '姓名', '名字', '客户'],
+  phone: ['телефон', 'номер', 'whatsapp', 'ватсап', 'phone', '电话', '手机'], city: ['город', 'city', '城市'] };
+const matchClientCol = (h) => { const v = String(h || '').toLowerCase().trim(); return Object.keys(CLIENT_COLS).find((k) => CLIENT_COLS[k].includes(v)) || null; };
+const looksCode = (v) => /^[A-Z]{1,3}-?\d{1,5}$/i.test(String(v || '').trim());
+
+app.post('/admin/clients/import', upload.single('file'), (req, res) => {
+  if (!isOwner(req) || !req.file) return res.redirect('/admin/clients');
+  const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+  const cities = db.prepare('SELECT * FROM cities').all();
+  const findCity = (v) => { const s = String(v || ''); return cities.find((c) => s && (s.includes(c.name) || (CITY_ZH[c.name] && s.includes(CITY_ZH[c.name])))); };
+  let added = 0; let updated = 0; const dup = [];
+  db.exec('BEGIN');
+  for (const name of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '' });
+    let hi = rows.findIndex((r) => r.map(matchClientCol).includes('code'));
+    let map = hi >= 0 ? rows[hi].map(matchClientCol) : null;
+    if (!map) {
+      const sample = rows.filter((r) => r.some((v) => looksCode(v))).slice(0, 30);
+      if (!sample.length) continue;
+      const width = Math.max(...sample.map((r) => r.length));
+      const score = (test) => [...Array(width).keys()].map((i) => sample.filter((r) => test(r[i])).length);
+      const best = (arr) => arr.indexOf(Math.max(...arr));
+      const ci = best(score(looksCode)); const pi = best(score((v) => String(v || '').replace(/\D/g, '').length >= 10));
+      const ni = best(score((v) => /[A-Za-zА-Яа-яЁё一-鿿]{2,}/.test(String(v || '')) && !looksCode(v)).map((x, i) => (i === ci || i === pi ? -1 : x)));
+      map = []; map[ci] = 'code'; if (pi !== ci) map[pi] = 'phone'; if (ni >= 0 && ni !== ci && ni !== pi) map[ni] = 'name';
+      hi = -1;
+    }
+    for (const row of rows.slice(hi + 1)) {
+      const rec = {}; map.forEach((f, i) => { if (f) rec[f] = String(row[i] ?? '').trim(); });
+      if (!looksCode(rec.code)) continue;
+      const code = rec.code.toUpperCase().replace('-', '').replace(/^D(?=\d)/, '');
+      const phone = normPhone(rec.phone); const city = findCity(rec.city);
+      const ex = db.prepare('SELECT * FROM clients WHERE code = ?').get(code);
+      const taken = phone.length >= 10 ? db.prepare('SELECT id FROM clients WHERE phone = ?').get(phone) : null;
+      if (taken && (!ex || taken.id !== ex.id)) { dup.push(dispCode(code)); continue; }
+      const ph = phone.length >= 10 ? phone : null;
+      if (ex) {
+        db.prepare('UPDATE clients SET name = COALESCE(NULLIF(?, \'\'), name), phone = COALESCE(?, phone), city_id = COALESCE(?, city_id) WHERE id = ?').run(rec.name || '', ph, city ? city.id : null, ex.id);
+        updated++;
+      } else {
+        const r = db.prepare('INSERT INTO clients (code, name, phone, city_id, legacy) VALUES (?, ?, ?, ?, 1)').run(code, rec.name || dispCode(code), ph || `stub-${code}`, city ? city.id : null);
+        linkOrphanParcels(r.lastInsertRowid, code);
+        added++;
+      }
+    }
+  }
+  db.exec('COMMIT');
+  req.session.flash = `${req.t('a_clients_added')}: ${added}, ${req.t('a_clients_updated')}: ${updated}${dup.length ? `. ${req.t('a_clients_dup')}: ${dup.slice(0, 30).join(', ')}` : ''}`;
+  res.redirect('/admin/clients');
 });
 
 app.post('/admin/clients/add', (req, res) => {
