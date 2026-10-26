@@ -25,13 +25,16 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;p
 .addr{background:#fafafa;border:1px dashed #cbd5e1;border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
 .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#eef0f3}
 .b-china{background:#e0e7ff;color:#3730a3}.b-transit{background:#fef3c7;color:#92400e}.b-border{background:#fde2e2;color:#991b1b}.b-arrived{background:#dcfce7;color:#166534}.b-delivered{background:#e5e7eb;color:#374151}
-.alert{padding:10px 14px;border-radius:8px;margin-bottom:12px}.alert.err{background:#fee2e2;color:#991b1b}.alert.ok{background:#dcfce7;color:#166534}.alert.info{background:#e0f2fe;color:#075985}
+.alert{padding:10px 14px;border-radius:8px;margin-bottom:12px}.alert.err{background:#fee2e2;color:#991b1b}.alert.ok{background:#dcfce7;color:#166534}.alert.info{background:#fdf1f1;color:var(--ink);border:1px solid #f3d2d3}
 .stat{font-size:28px;font-weight:800}
 .narrow{max-width:640px;margin:0 auto}.keepers{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);display:grid;gap:4px;font-size:15px}.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:#f1e9ea;border-radius:12px;padding:4px;gap:4px;margin-bottom:14px}.seg a{text-align:center;padding:12px 8px;border-radius:9px;font-weight:700;font-size:17px;color:var(--ink)}.seg a:hover{text-decoration:none;background:#fff}.seg a.on{background:var(--brand);color:#fff;box-shadow:0 2px 8px rgba(229,38,45,.3)}.seg a.on::before{content:'✓ '}
 .codebar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-color:var(--brand);background:var(--brand-soft)}.center{text-align:center}.code.big{font-size:44px;margin:8px 0}.wide{width:100%;margin-top:16px;text-align:center}
-.hint{font-size:13px;color:var(--muted);background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px;margin-top:6px}
+.hint{font-size:13px;color:var(--muted);background:#faf5f5;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:6px}
+.pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}.pick label{margin:0;cursor:pointer}.pick input{position:absolute;opacity:0;pointer-events:none}
+.pick span{display:block;text-align:center;padding:12px 6px;border:2px solid var(--line);border-radius:10px;font-weight:700;font-size:16px;background:#fff;transition:all .15s}
+.pick label:hover span{border-color:var(--brand)}.pick input:checked+span{background:var(--brand);border-color:var(--brand);color:#fff}.pick input:focus-visible+span{outline:3px solid #f5b5b7;outline-offset:2px}
 .steps{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}.steps span{flex:1;min-width:90px;text-align:center;padding:8px;border-radius:8px;background:#fff;border:1px solid var(--line);font-size:13px;color:var(--muted)}
-.steps span.on{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:700}.steps span.done{color:var(--ok);border-color:#bbf7d0}
+.steps span.on{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:700}.steps span.done{color:var(--brand);border-color:#f3c6c8}
 .wh-list{display:grid;gap:12px}.wh{display:flex;flex-direction:column;gap:4px;border:2px solid var(--line);border-radius:12px;padding:16px;color:var(--ink)}.wh:hover{border-color:var(--brand);text-decoration:none}.wh b{font-size:20px}
 .field{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}.field>div{min-width:0}.val{font-weight:600;word-break:break-word}
 .alert.warn{background:#fef3c7;color:#92400e}.alert.warn a{color:inherit}
@@ -88,7 +91,7 @@ document.querySelectorAll('[data-flip]').forEach(el=>{const fin=el.textContent;e
 const iv=setInterval(()=>{f++;const settled=Math.floor(f/total*fin.length);el.textContent=[...fin].map((c,i)=>i<settled||!/[0-9]/.test(c)?c:String(Math.floor(Math.random()*10))).join('');if(f>=total){clearInterval(iv);el.textContent=fin;el.classList.add('landed')}},45)});
 // Подсветка выбранного склада выдачи на карте.
 const city=document.getElementById('f-city');const hero=document.querySelector('.hero');
-if(city&&hero)city.addEventListener('change',()=>{const name=city.options[city.selectedIndex].text;const g=hero.querySelector('[data-city="'+name+'"]');
+if(city&&hero)city.addEventListener('change',e=>{const name=e.target.dataset.name;const g=hero.querySelector('[data-city="'+name+'"]');
 hero.querySelectorAll('.hl').forEach(x=>x.classList.remove('hl'));hero.classList.toggle('sel',!!g);if(!g)return;g.classList.add('hl');
 hero.querySelectorAll('[data-to="'+g.dataset.key+'"]').forEach(x=>x.classList.add('hl'))});
 `;

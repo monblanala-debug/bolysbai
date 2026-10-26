@@ -115,8 +115,8 @@ app.get('/', (req, res) => {
       <label for="f-name">${esc(t('name'))}</label><input id="f-name" name="name" required maxlength="80" autocomplete="name">
       <label for="f-phone">${esc(t('phone'))}</label><input id="f-phone" name="phone" type="tel" required placeholder="+7 777 123 45 67" autocomplete="tel">
       <div class="hint">${esc(t('phone_hint'))}</div>
-      <label for="f-city">${esc(t('city'))}</label><select id="f-city" name="city_id" required><option value="">${esc(t('choose_city'))}</option>
-        ${cities.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+      <label>${esc(t('city'))}</label><div class="pick" id="f-city">
+        ${cities.map((c, i) => `<label><input type="radio" name="city_id" value="${c.id}" data-name="${esc(c.name)}" required${i === 0 ? ' id="f-city-first"' : ''}><span>${esc(c.name)}</span></label>`).join('')}</div>
       <div class="hint">${esc(t('city_hint'))}</div>
       <button class="wide">${esc(t('get_code'))}</button>
     </form></div>
