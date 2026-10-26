@@ -386,8 +386,7 @@ app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
 const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/receive', 'a_receive'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/settings', 'a_settings']];
 function adminRender(req, res, title, body) {
   const role = `<span class="badge" style="margin-left:auto">${esc(req.t(isOwner(req) ? 'role_owner' : 'role_accountant'))}</span>`;
-  const pend = db.prepare('SELECT COUNT(*) c FROM parcels WHERE photo_token IS NOT NULL AND wa_sent_at IS NULL AND client_id IS NOT NULL').get().c;
-  const tabs = ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings').map(([h, k]) => `<a href="${h}" class="${req.path === h || (h !== '/admin' && req.path.startsWith(h)) ? 'on' : ''}">${esc(req.t(k))}${h === '/admin/receive' && pend ? ` <span class="cnt">${pend}</span>` : ''}</a>`).join('');
+  const tabs = ADMIN_TABS.filter(([h]) => isOwner(req) || h !== '/admin/settings').map(([h, k]) => `<a href="${h}" class="${req.path === h || (h !== '/admin' && req.path.startsWith(h)) ? 'on' : ''}">${esc(req.t(k))}</a>`).join('');
   const flash = req.session.flash; delete req.session.flash;
   res.render(title, `<div class="subnav noprint">${tabs}${role}</div>${flash ? `<div class="alert ok">${esc(flash)}</div>` : ''}${body}`);
 }
@@ -414,8 +413,7 @@ app.get('/admin', (req, res) => {
   const t = req.t;
   const c = (sql) => db.prepare(sql).get().c;
   const byStatus = Object.keys(STATUSES).map((s) => `<a class="card" href="/admin/parcels?status=${s}" style="display:block;margin:0">${statusBadge(t, s)}<div class="stat">${c(`SELECT COUNT(*) c FROM parcels WHERE status = '${s}'`)}</div></a>`).join('');
-  const pending = pendingWa();
-  adminRender(req, res, t('a_dashboard'), `${pending.length ? pendingCard(t, pending) : ''}<div class="grid g4">
+  adminRender(req, res, t('a_dashboard'), `<div class="grid g4">
     <div class="card"><div class="muted">${esc(t('a_total_clients'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM clients')}</div></div>
     <div class="card"><div class="muted">${esc(t('a_total_parcels'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM parcels')}</div></div>
     <div class="card"><div class="muted">${esc(t('a_unpaid'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM invoices WHERE paid = 0')}</div></div>
@@ -496,17 +494,6 @@ app.get('/admin/api/client', (req, res) => {
   res.json(client ? { name: client.name, city: client.city_name || '', code: dispCode(client.code) } : null);
 });
 
-// Посылки с фото, о которых ещё не написали клиенту: висят красным списком, пока не нажмут WhatsApp.
-const pendingWa = () => db.prepare(`SELECT p.*, c.name FROM parcels p JOIN clients c ON c.id = p.client_id
-  WHERE p.photo_token IS NOT NULL AND p.wa_sent_at IS NULL ORDER BY p.id LIMIT 100`).all();
-function pendingCard(t, pending) {
-  return `<div class="card" style="border:2px solid var(--brand)"><h2 style="margin-top:0;color:var(--brand)">⚠ ${esc(t('a_pending_wa'))}: ${pending.length}</h2>
-    <div class="invlist">${pending.map((p) => { const ph = parcelPhotos(p.id)[0]; return `<div class="inv prow">
-      ${ph ? `<img src="/photo/${esc(ph.file)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex:0 0 56px">` : ''}
-      <div style="min-width:0"><b>${esc(dispCode(p.client_code || ''))}</b> · ${esc(p.name)}<div class="muted" style="font-size:13px">${esc(fmtDT(p.created_at))} · ${esc(t('places'))}: ${p.places}</div></div>
-      <a class="btn wa-btn sm" style="flex:0 0 auto;font-size:14px;padding:10px 12px" href="/admin/parcels/${p.id}/wa" target="_blank" onclick="setTimeout(()=>location.reload(),1500)">WhatsApp</a></div>`; }).join('')}</div></div>`;
-}
-
 app.get('/admin/receive', (req, res) => {
   const t = req.t;
   const whs = activeWarehouses();
@@ -514,8 +501,7 @@ app.get('/admin/receive', (req, res) => {
   const done = req.query.done ? db.prepare('SELECT * FROM parcels WHERE id = ?').get(parseInt(req.query.done, 10)) : null;
   const doneClient = done && done.client_id ? getClient(done.client_id) : null;
   const recent = db.prepare(`SELECT * FROM parcels WHERE photo_token IS NOT NULL AND date(created_at) = date('now') ORDER BY id DESC LIMIT 30`).all();
-  const pending = pendingWa();
-  adminRender(req, res, t('a_receive'), `${pending.length && !done ? pendingCard(t, pending) : ''}${done ? `<div class="card" style="border:2px solid #22c55e"><h2 style="margin-top:0">✓ ${esc(t('a_receive_saved'))}: ${esc(dispCode(done.client_code || ''))}${doneClient ? ` · ${esc(doneClient.name)}` : ''}</h2>
+  adminRender(req, res, t('a_receive'), `${done ? `<div class="card" style="border:2px solid #22c55e"><h2 style="margin-top:0">✓ ${esc(t('a_receive_saved'))}: ${esc(dispCode(done.client_code || ''))}${doneClient ? ` · ${esc(doneClient.name)}` : ''}</h2>
       ${photoGrid(parcelPhotos(done.id))}
       ${doneClient ? `<p><a class="btn wa-btn" href="/admin/parcels/${done.id}/wa" target="_blank" onclick="setTimeout(()=>location.href='/admin/receive',1500)">${esc(t('a_send_wa'))}</a></p>` : `<p class="alert err">${esc(t('a_no_client'))}</p>`}</div>` : ''}
   <div class="card"><h2 style="margin-top:0">${esc(t('a_receive_title'))}</h2><p class="muted">${esc(t('a_receive_hint'))}</p>
