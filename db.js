@@ -260,7 +260,9 @@ function setting(key) {
 // Оставляет только цифры; казахстанский/российский формат 8XXXXXXXXXX приводится к 7XXXXXXXXXX.
 function normPhone(p) {
   const d = String(p || '').replace(/\D/g, '');
-  return d.length === 11 && d[0] === '8' ? '7' + d.slice(1) : d;
+  if (d.length === 11 && d[0] === '8') return '7' + d.slice(1);
+  if (d.length === 10 && d[0] === '7') return '7' + d; // 747 123 45 67 без +7
+  return d;
 }
 
 // Код клиента — сквозной номер, начиная с CODE_START (по умолчанию 1600).

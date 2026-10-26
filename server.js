@@ -129,8 +129,8 @@ app.get('/', (req, res) => {
   const t = req.t;
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   res.render(t('nav_home'), `<div class="narrow"><div class="card login-top"><b>${esc(t('have_code'))}</b>
-      <form method="post" action="/cabinet/login" class="row" style="margin-top:8px"><div><input name="phone" type="tel" required placeholder="${esc(t('phone'))}" autocomplete="tel"></div>
-      <div style="min-width:110px"><input name="code" required placeholder="${esc(t('code'))}: D1600" autocomplete="off" autocapitalize="characters"></div><button class="sec">${esc(t('login_btn'))}</button></form></div>
+      <form method="post" action="/cabinet/login" class="row" style="margin-top:8px"><div><input name="phone" type="tel" required placeholder="+7 747 123 45 67" autocomplete="tel"></div>
+      <div style="min-width:110px"><input name="code" required placeholder="${esc(t('code'))}: D1600" autocomplete="off" autocapitalize="characters"></div><button class="sec">${esc(t('login_btn'))}</button></form><ul class="hint" style="margin:6px 0 0;padding-left:18px"><li>${esc(t('login_rules'))}</li><li>${esc(t('login_fmt_phone'))}</li><li>${esc(t('login_fmt_code'))}</li></ul></div>
     ${steps(t, 1)}<div class="card">
     <h1>${esc(t('hero_title'))}</h1><p class="muted">${esc(t('hero_sub'))}</p>
     <form method="post" action="/register">
@@ -293,9 +293,9 @@ app.get('/cabinet', (req, res) => {
   const t = req.t;
   const client = req.session.clientId && getClient(req.session.clientId);
   if (!client) {
-    return res.render(t('login_title'), `<div class="card" style="max-width:420px;margin:0 auto"><h1>${esc(t('login_title'))}</h1><p class="muted">${esc(t('login_hint'))}</p>
+    return res.render(t('login_title'), `<div class="card" style="max-width:420px;margin:0 auto"><h1>${esc(t('login_title'))}</h1><p class="muted">${esc(t('login_hint'))}</p><ul class="hint" style="margin:6px 0 0;padding-left:18px"><li>${esc(t('login_rules'))}</li><li>${esc(t('login_fmt_phone'))}</li><li>${esc(t('login_fmt_code'))}</li></ul>
       ${req.query.exists ? `<div class="alert info">${esc(t('phone_exists'))}</div>` : ''}${req.query.err ? `<div class="alert err">${esc(t(req.query.err === 'many' ? 'login_many' : 'login_error'))}</div>` : ''}
-      <form method="post" action="/cabinet/login"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required placeholder="+7 777 123 45 67" autocomplete="tel">
+      <form method="post" action="/cabinet/login"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required placeholder="+7 747 123 45 67" autocomplete="tel">
       <label>${esc(t('code'))}</label><input name="code" required placeholder="D1600" autocomplete="off" autocapitalize="characters">
       <p><button>${esc(t('login_btn'))}</button></p></form>
       ${setting('whatsapp') ? `<p class="muted" style="font-size:14px">${esc(t('forgot_code'))} <a href="https://wa.me/${esc(setting('whatsapp'))}?text=${encodeURIComponent(t('forgot_code_msg'))}" target="_blank" rel="noopener">WhatsApp</a></p>` : ''}
