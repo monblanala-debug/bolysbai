@@ -347,6 +347,7 @@ function myParcels(req, client) {
     <div class="row" style="align-items:center"><b>${esc(p.track)}</b><div style="flex:0 0 auto">${statusBadge(t, p.status)}</div></div>
     <div class="muted" style="font-size:14px">${p.status === 'expected' ? esc(t('trk_wait')) : `${esc(t('trk_received'))}${p.scanned_at ? ': ' + esc(fmtDay(p.scanned_at)) : ''}${p.places ? ` · ${p.places} ${esc(t('places').toLowerCase())}` : ''}`}</div>
     ${f.length ? `<div class="thumbs" style="margin-top:6px">${f.map((x) => `<a href="/photo/${esc(x.file)}" target="_blank"><img src="/photo/${esc(x.file)}" loading="lazy" alt=""></a>`).join('')}</div>` : ''}
+    <form method="post" action="/cabinet/tracks/${p.id}/desc" class="row" style="margin:6px 0 0;align-items:center;gap:6px"><div><input name="description" maxlength="120" value="${esc(p.description || '')}" placeholder="${esc(t('trk_desc_ph'))}"></div><button class="sec sm" style="flex:0 0 auto">${esc(t('save'))}</button></form>
     ${p.status === 'expected' ? `<form method="post" action="/cabinet/tracks/${p.id}/delete" style="margin:6px 0 0"><button class="sec sm">${esc(t('trk_remove'))}</button></form>` : ''}</div>`; }).join('');
   const msg = req.session.trkMsg; delete req.session.trkMsg;
   return `<div class="card" id="tracks"><h2>${esc(t('trk_title'))}</h2><p class="muted">${esc(t('trk_hint'))}</p>
@@ -367,6 +368,11 @@ app.post('/cabinet/tracks', (req, res) => {
     else taken.push(tr);
   }
   req.session.trkMsg = `${req.t('trk_added')}: ${added}${taken.length ? `. ${req.t('trk_taken')}: ${taken.join(', ')}` : ''}`;
+  res.redirect('/cabinet#tracks');
+});
+// Клиент подписывает, что в посылке (видно и складу в «Посылках»).
+app.post('/cabinet/tracks/:id/desc', (req, res) => {
+  if (req.session.clientId) db.prepare("UPDATE parcels SET description = ?, updated_at = datetime('now') WHERE id = ? AND client_id = ?").run(String(req.body.description || '').trim().slice(0, 120), parseInt(req.params.id, 10), req.session.clientId);
   res.redirect('/cabinet#tracks');
 });
 app.post('/cabinet/tracks/:id/delete', (req, res) => {
