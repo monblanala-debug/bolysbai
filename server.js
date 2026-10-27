@@ -146,7 +146,7 @@ app.get('/', (req, res) => {
   const t = req.t;
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   res.render(t('nav_home'), `<div class="narrow"><div class="card login-top"><b>${esc(t('have_code'))}</b>
-      <form method="post" action="/cabinet/login" class="row" style="margin-top:8px"><div><input name="phone" type="tel" required placeholder="+7 747 123 45 67" autocomplete="tel"></div>
+      <form method="post" action="/cabinet/login" class="row" style="margin-top:8px"><div><input name="phone" type="tel" placeholder="+7 747 123 45 67" autocomplete="tel"></div>
       <div style="min-width:110px"><input name="code" required placeholder="${esc(t('code'))}: D1600" autocomplete="off" autocapitalize="characters"></div><button class="sec">${esc(t('login_btn'))}</button></form><p class="muted" style="font-size:14px;margin:6px 0 0">${esc(t('login_rules'))} <a href="/forgot">${esc(t('forgot_code_short'))}</a></p></div>
     ${steps(t, 1)}<div class="card">
     <h1>${esc(t('hero_title'))}</h1><p class="muted">${esc(t('hero_sub'))}</p>
@@ -267,7 +267,7 @@ app.get('/track', (req, res) => {
   const tracks = String(req.query.q || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean).slice(0, 50);
   let results = '';
   if (tracks.length) {
-    results = `<div class="fade">${tracks.map((no) => {
+    results = `<div class="fade"><div class="alert info">${esc(t('track_eta'))}</div>${tracks.map((no) => {
       const i = findInvoice(no);
       if (!i) return `<div class="card"><b>${esc(no)}</b><p class="muted" style="margin:4px 0 0">${esc(t('track_none'))}</p></div>`;
       return `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(i.number)}</b><div style="flex:0 0 auto">${invBadge(t, i)}</div></div>
@@ -339,7 +339,7 @@ app.get('/cabinet', (req, res) => {
   if (!client) {
     return res.render(t('login_title'), `<div class="card" style="max-width:420px;margin:0 auto"><h1>${esc(t('login_title'))}</h1><p class="muted">${esc(t('login_rules'))}</p>
       ${req.query.exists ? `<div class="alert info">${esc(t('phone_exists'))}</div>` : ''}${req.query.err ? `<div class="alert err">${esc(t(req.query.err === 'many' ? 'login_many' : 'login_error'))}</div>` : ''}
-      <form method="post" action="/cabinet/login"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required placeholder="+7 747 123 45 67" autocomplete="tel">
+      <form method="post" action="/cabinet/login"><label>${esc(t('phone'))}</label><input name="phone" type="tel" placeholder="+7 747 123 45 67" autocomplete="tel">
       <label>${esc(t('code'))}</label><input name="code" required placeholder="D1600" autocomplete="off" autocapitalize="characters">
       <p><button>${esc(t('login_btn'))}</button></p></form>
       <p style="font-size:14px"><a href="/forgot">${esc(t('forgot_code_short'))}</a></p>
@@ -380,7 +380,9 @@ app.post('/cabinet/login', (req, res) => {
   if (f && f.until > now && f.n >= 10) return res.redirect('/cabinet?err=many');
   // Код принимаем в любом виде: 1600, D1600, d1600, D1600-4567, Y7.
   const code = String(req.body.code || '').trim().toUpperCase().replace(/\s+/g, '').replace(/-\d{4}$/, '').replace(/^D(?=\d)/, '');
-  const c = db.prepare('SELECT id FROM clients WHERE phone = ? AND code = ?').get(normPhone(req.body.phone), code);
+  // Старые клиенты, у которых в базе нет номера (stub-…), входят по одному коду.
+  const c = db.prepare('SELECT id FROM clients WHERE phone = ? AND code = ?').get(normPhone(req.body.phone), code)
+    || db.prepare("SELECT id FROM clients WHERE code = ? AND phone LIKE 'stub-%'").get(code);
   if (!c) {
     loginFails.set(ip, { n: (f && f.until > now ? f.n : 0) + 1, until: now + 15 * 60 * 1000 });
     return res.redirect('/cabinet?err=1');
@@ -441,7 +443,7 @@ function invoicePage(req, inv) {
   ${photos.length || req.session.admin ? `<div class="card"><h2 style="margin-top:0">${esc(t('inv_photos'))}</h2>
     ${photos.length ? `<div class="photos">${photos.map((f) => `<div style="position:relative"><a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a>${req.session.admin ? `<form method="post" action="/admin/invoices/${inv.id}/photos/${f.id}/delete" class="noprint" style="position:absolute;top:4px;right:4px;margin:0" onsubmit="return confirm('${esc(t('confirm_delete_photo'))}')"><button class="sec sm" style="padding:2px 8px">✕</button></form>` : ''}</div>`).join('')}</div>` : `<p class="muted">${esc(t('inv_no_photos'))}</p>`}
     ${req.session.admin ? photoForm(t, inv.id, `/admin/invoices/${inv.id}`) + PHOTO_JS : ''}</div>` : ''}
-  <div class="card noprint"><div class="row" style="align-items:center"><h2 style="margin:0">${esc(t('status'))}</h2><div style="flex:0 0 auto">${invBadge(t, inv)}</div></div>${invTimeline(t, inv)}</div>
+  <div class="card noprint"><div class="row" style="align-items:center"><h2 style="margin:0">${esc(t('status'))}</h2><div style="flex:0 0 auto">${invBadge(t, inv)}</div></div>${invTimeline(t, inv)}<p class="muted" style="font-size:14px;margin:0">${esc(t('track_eta'))}</p></div>
   ${forwardCard(req, inv)}
   <div class="wb wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
       ${rules.map((l, i) => (i === 0 && !/^\d/.test(l) ? `<p><b>${esc(l)}</b></p>` : `<p>${esc(l)}</p>`)).join('')}</div>
