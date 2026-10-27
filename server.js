@@ -237,8 +237,28 @@ function parcelHistory(t, parcelId) {
     .map((e) => `<div>${esc(fmtDate(e.created_at))} — ${esc(t('st_' + e.status))}${e.comment ? ' · ' + esc(e.comment) : ''}</div>`).join('');
 }
 
-const INV_STATUSES = ['transit', 'border', 'arrived', 'delivered'];
-const invStatusOptions = (t, sel) => INV_STATUSES.map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(t('st_' + k))}</option>`).join('');
+// Статус накладной идёт сам по дням от загрузки в базу: 0 — отправлено, +3 — едет на таможню, +5 — на таможне,
+// +7 — оформляется, +8 — ждёт выезда (и стоит так). «Прибыло» и «Выдано» ставят вручную.
+const INV_STAGES = [['sent', 0], ['to_customs', 3], ['at_customs', 5], ['clearing', 7], ['queue', 8], ['arrived'], ['delivered']];
+const INV_STATUSES = ['auto', ...INV_STAGES.map(([k]) => k)];
+const invStatusOptions = (t, sel) => INV_STATUSES.map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(t('ist_' + k))}</option>`).join('');
+// Дни считаем по календарю Алматы (UTC+5).
+const almatyDay = (d) => Math.floor((d.getTime() + 5 * 3600e3) / 86400e3);
+const invStart = (i) => new Date(String(i.created_at || '').replace(' ', 'T') + 'Z');
+function invStage(i) {
+  if (INV_STATUSES.includes(i.inv_status) && i.inv_status !== 'auto') return i.inv_status;
+  const days = almatyDay(new Date()) - almatyDay(invStart(i));
+  return INV_STAGES.filter(([, d]) => d !== undefined && days >= d).pop()[0];
+}
+const invBadge = (t, i) => { const s = invStage(i); return `<span class="badge b-${s === 'sent' ? 'china' : s === 'arrived' || s === 'delivered' ? s : s === 'to_customs' ? 'transit' : 'border'}">${esc(t('ist_' + s))}</span>`; };
+// Этапы: пройденные — с датой, текущий выделен, будущие — серые и без дат (сроки не обещаем).
+function invTimeline(t, i) {
+  const cur = INV_STAGES.findIndex(([k]) => k === invStage(i));
+  const start = almatyDay(invStart(i));
+  const day = (n) => fmtDay(new Date((start + n) * 86400e3).toISOString().slice(0, 10));
+  const when = (d, n) => (d !== undefined && n <= cur ? day(d) : '');
+  return `<ol class="tl">${INV_STAGES.map(([k, d], n) => `<li class="${n < cur ? 'done' : n === cur ? 'on' : ''}"><b>${esc(t('ist_' + k))}${k === 'arrived' && i.destination ? ` · ${esc(i.destination)}` : ''}</b>${when(d, n) ? `<div class="muted" style="font-size:13px">${esc(when(d, n))}</div>` : ''}</li>`).join('')}</ol>`;
+}
 // Номер накладной без учёта регистра и пробелов: d1601-1030-4 → D1601-1030-4.
 const findInvoice = (no) => db.prepare('SELECT * FROM invoices WHERE number = ?').get(String(no || '').trim().toUpperCase().replace(/\s+/g, ''));
 
@@ -250,9 +270,8 @@ app.get('/track', (req, res) => {
     results = `<div class="fade">${tracks.map((no) => {
       const i = findInvoice(no);
       if (!i) return `<div class="card"><b>${esc(no)}</b><p class="muted" style="margin:4px 0 0">${esc(t('track_none'))}</p></div>`;
-      const st = INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit';
-      return `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(i.number)}</b><div style="flex:0 0 auto">${statusBadge(t, st)}</div></div>
-        ${statusLine(t, st)}
+      return `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(i.number)}</b><div style="flex:0 0 auto">${invBadge(t, i)}</div></div>
+        ${invTimeline(t, i)}
         <div class="muted">${esc(t('inv_sent'))}: ${esc(fmtDay(i.inv_date || i.created_at))}${i.origin || i.destination ? ` · ${esc(i.origin)} → ${esc(i.destination)}` : ''}</div>
         <div class="muted">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}</div>
         <p style="margin:10px 0 0"><a class="btn sec sm" href="/invoice/${i.id}">${esc(t('inv_view'))}</a></p></div>`;
@@ -298,7 +317,7 @@ function invoicesTable(t, invoices, base, withPaid = true) {
   if (base === '/invoice/') return `<div class="invlist">${invoices.map((i) => `<div class="inv">
     <div class="row" style="align-items:center"><b style="font-size:17px">${esc(i.number)}</b><span class="muted" style="flex:0 0 auto">${esc(fmtDay(i.inv_date || i.created_at))}</span></div>
     <div class="muted" style="margin:4px 0">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}${i.pc ? ` · 📷 ${i.pc}` : ''}</div>
-    <div class="row" style="align-items:center"><div style="flex:0 0 auto">${statusBadge(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit')}
+    <div class="row" style="align-items:center"><div style="flex:0 0 auto">${invBadge(t, i)}
       ${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</div>
       <b style="font-size:20px;color:var(--brand);text-align:right">${esc(money(i.amount))}</b></div>
     <a class="btn sec" style="display:block;text-align:center;margin-top:10px" href="${base}${i.id}">${esc(t('inv_view'))}</a></div>`).join('')}</div>`;
@@ -306,7 +325,7 @@ function invoicesTable(t, invoices, base, withPaid = true) {
   return `<div class="tbl"><table><tr><th><input type="checkbox" id="inv-all" style="width:auto"></th><th>${esc(t('date'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('inv_cargo'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th></tr>
   ${invoices.map((i) => `<tr><td><input type="checkbox" name="ids" value="${i.id}" form="bulkinv" style="width:auto"></td><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b>${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}</td>
   <td>${esc(cargoSummary(t, i))}</td><td><b>${esc(money(i.amount))}</b></td>
-  <td><div style="margin-bottom:4px">${statusBadge(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'transit')}</div>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
+  <td><div style="margin-bottom:4px">${invBadge(t, i)}</div>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
   <td style="white-space:nowrap"><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a> ${photoForm(t, i.id, '/admin/invoices')}${i.pc ? ` <span class="muted">📷 ${i.pc}</span>` : ''}</td></tr>`).join('')}</table></div>
   <form method="post" action="/admin/invoices/bulk" id="bulkinv" class="row" style="margin-top:12px"><div><label>${esc(t('a_bulk_inv'))}</label><select name="inv_status">${invStatusOptions(t, 'arrived')}</select></div>
     ${withPaid ? `<div><label>${esc(t('paid'))}</label><select name="paid"><option value="">—</option><option value="1">${esc(t('paid'))}</option><option value="0">${esc(t('unpaid'))}</option></select></div>` : ''}
@@ -422,6 +441,7 @@ function invoicePage(req, inv) {
   ${photos.length || req.session.admin ? `<div class="card"><h2 style="margin-top:0">${esc(t('inv_photos'))}</h2>
     ${photos.length ? `<div class="photos">${photos.map((f) => `<div style="position:relative"><a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a>${req.session.admin ? `<form method="post" action="/admin/invoices/${inv.id}/photos/${f.id}/delete" class="noprint" style="position:absolute;top:4px;right:4px;margin:0" onsubmit="return confirm('${esc(t('confirm_delete_photo'))}')"><button class="sec sm" style="padding:2px 8px">✕</button></form>` : ''}</div>`).join('')}</div>` : `<p class="muted">${esc(t('inv_no_photos'))}</p>`}
     ${req.session.admin ? photoForm(t, inv.id, `/admin/invoices/${inv.id}`) + PHOTO_JS : ''}</div>` : ''}
+  <div class="card noprint"><div class="row" style="align-items:center"><h2 style="margin:0">${esc(t('status'))}</h2><div style="flex:0 0 auto">${invBadge(t, inv)}</div></div>${invTimeline(t, inv)}</div>
   ${forwardCard(req, inv)}
   <div class="wb wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
       ${rules.map((l, i) => (i === 0 && !/^\d/.test(l) ? `<p><b>${esc(l)}</b></p>` : `<p>${esc(l)}</p>`)).join('')}</div>
@@ -932,7 +952,7 @@ function invoiceForm(req, client, inv) {
   <div class="row">${inp('rate', '单价', 'Цена')}<div><label>за · 按</label><select name="price_basis" id="i-price_basis"><option value="m3" ${v.price_basis !== 'kg' ? 'selected' : ''}>м³</option><option value="kg" ${v.price_basis === 'kg' ? 'selected' : ''}>кг</option></select></div>
     ${inp('freight', '运费 $', 'Фрахт')}${inp('goods_value', '货值 $', 'Стоимость товара')}${inp('ins_rate', '保率 %', 'Страховка %')}${inp('ins_fee', '保险费 $', 'Страховка $')}</div>
   <div class="row">${inp('packing', '打包方式', 'Упаковка', 'list="dl-pack"')}${inp('pack_fee', '包装费 $', 'За упаковку')}${inp('advance', '垫付款 $', 'Перевод на заказ')}${inp('unload_fee', '落地费 $', 'За разгрузку')}${inp('other_fee', '其他款项 $', 'Другие платежи')}</div>
-  <div class="row"><div><label>${esc(t('status'))}</label><select name="inv_status">${invStatusOptions(t, v.inv_status || 'transit')}</select></div>${inp('cargo_status', '运踪', t('inv_cargo_status'), 'placeholder="3.13到"')}${inp('pay_note', '付款', t('inv_pay_note'))}</div>
+  <div class="row"><div><label>${esc(t('status'))}</label><select name="inv_status">${invStatusOptions(t, INV_STATUSES.includes(v.inv_status) ? v.inv_status : 'auto')}</select></div>${inp('cargo_status', '运踪', t('inv_cargo_status'), 'placeholder="3.13到"')}${inp('pay_note', '付款', t('inv_pay_note'))}</div>
   <div class="row">${inp('note', '备注', 'Замечание')}${inp('number', '货号', `${t('invoice_no')} (${t('inv_auto')})`, `placeholder="D${esc(client.code)}-MMDD-мест" ${inv ? 'data-touched="1"' : ''}`)}
     <div><label>总计 · ${esc(t('total'))}</label><div class="stat" id="i-total" style="color:var(--brand)">0</div></div></div>
   <p><button>${esc(inv ? t('save') : t('create'))}</button></p></form></div>
@@ -964,7 +984,7 @@ function saveInvoice(b, existing) {
   const v = {};
   for (const k of ['origin', 'destination', 'transport', 'delivery_time', 'sender', 'consignee', 'goods', 'packing', 'note', 'cargo_status', 'pay_note']) v[k] = String(b[k] || '').trim().slice(0, 300);
   for (const k of NUM_FIELDS) v[k] = numOrNull(String(b[k] ?? '').replace(',', '.'));
-  v.inv_status = INV_STATUSES.includes(b.inv_status) ? b.inv_status : /到|прибыл/i.test(v.cargo_status) ? 'arrived' : existing ? existing.inv_status : 'transit';
+  v.inv_status = INV_STATUSES.includes(b.inv_status) ? b.inv_status : /到|прибыл/i.test(v.cargo_status) ? 'arrived' : existing ? existing.inv_status : 'auto';
   v.inv_date = /^\d{4}-\d{2}-\d{2}$/.test(b.inv_date) ? b.inv_date : new Date().toISOString().slice(0, 10);
   v.price_basis = b.price_basis === 'kg' ? 'kg' : 'm3';
   // Пустые поля заполняем из выбранных посылок и по формулам, как в бумажной накладной.

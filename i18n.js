@@ -63,6 +63,7 @@ const T = {
     add_track: 'Добавить свой трек-номер', add_track_hint: 'Сообщите нам трек, чтобы мы быстрее связали посылку с вами', add: 'Добавить',
     invoice: 'Накладная', invoice_no: 'Номер', amount: 'Сумма', paid: 'Оплачено', unpaid: 'Не оплачено', open: 'Открыть', print: 'Печать',
     rate: 'Тариф за кг', total_weight: 'Общий вес', client: 'Клиент', total: 'Итого',
+    ist_auto: 'Авто (по дням)', ist_sent: 'Отправлено со склада в Китае', ist_to_customs: 'Едет на таможню', ist_at_customs: 'Прибыло на таможню', ist_clearing: 'Оформляется на таможне', ist_queue: 'Ожидает выезда с таможни', ist_arrived: 'Прибыло в пункт назначения', ist_delivered: 'Выдано клиенту',
     st_expected: 'Ожидается на складе', st_china: 'Принят на складе в Китае', st_transit: 'В пути', st_border: 'На границе / таможня',
     st_arrived: 'Прибыл в город выдачи', st_delivered: 'Выдан клиенту',
     // админка
@@ -161,6 +162,7 @@ const T = {
     add_track: '添加快递单号', add_track_hint: '提前告诉我们单号，便于更快匹配包裹', add: '添加',
     invoice: '账单', invoice_no: '编号', amount: '金额', paid: '已付款', unpaid: '未付款', open: '查看', print: '打印',
     rate: '每公斤单价', total_weight: '总重量', client: '客户', total: '合计',
+    ist_auto: '自动（按天）', ist_sent: '已从中国仓发出', ist_to_customs: '前往海关', ist_at_customs: '已到达海关', ist_clearing: '清关中', ist_queue: '等待出关', ist_arrived: '已到达目的地', ist_delivered: '已签收',
     st_expected: '待入库', st_china: '已入中国仓库', st_transit: '运输中', st_border: '口岸 / 清关中',
     st_arrived: '已到达目的城市', st_delivered: '已签收',
     admin_login: '管理员登录', password: '密码',
@@ -238,6 +240,7 @@ const T = {
     add: 'Қосу',
     invoice: 'Жүкқұжат', invoice_no: 'Нөмір', amount: 'Сомасы', paid: 'Төленді', unpaid: 'Төленбеген', open: 'Ашу', print: 'Басып шығару',
     total_weight: 'Жалпы салмақ', client: 'Клиент', total: 'Барлығы',
+    ist_auto: 'Авто (күн бойынша)', ist_sent: 'Қытайдағы қоймадан жөнелтілді', ist_to_customs: 'Кеденге бара жатыр', ist_at_customs: 'Кеденге келді', ist_clearing: 'Кеденде рәсімделуде', ist_queue: 'Кеденнен шығуды күтуде', ist_arrived: 'Баратын жерге келді', ist_delivered: 'Клиентке берілді',
     st_expected: 'Қоймаға күтілуде', st_china: 'Қытайдағы қоймаға қабылданды', st_transit: 'Жолда', st_border: 'Шекарада / кеденде', st_arrived: 'Беру қаласына келді', st_delivered: 'Клиентке берілді',
     search: 'Іздеу', save: 'Сақтау', back: 'Артқа', edit: 'Өзгерту', delete: 'Жою',
     mark: 'Таңба (唛头) — әр сәлемдемеге жазыңыз', warehouse: 'Қытайдағы қойма', choose_wh: 'Қойманы таңдаңыз', change_wh: 'Қойманы ауыстыру', wh_hint: 'Жеке кабинетте кез келген уақытта ауыстыруға болады',
