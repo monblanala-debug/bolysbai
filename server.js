@@ -147,7 +147,7 @@ app.get('/', (req, res) => {
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   res.render(t('nav_home'), `<div class="narrow"><div class="card login-top"><b>${esc(t('have_code'))}</b>
       <form method="post" action="/cabinet/login" class="row" style="margin-top:8px"><div><input name="phone" type="tel" required placeholder="+7 747 123 45 67" autocomplete="tel"></div>
-      <div style="min-width:110px"><input name="code" required placeholder="${esc(t('code'))}: D1600" autocomplete="off" autocapitalize="characters"></div><button class="sec">${esc(t('login_btn'))}</button></form><p class="muted" style="font-size:14px;margin:6px 0 0">${esc(t('login_rules'))}${setting('whatsapp') ? ` <a href="https://wa.me/${esc(setting('whatsapp'))}?text=${encodeURIComponent(t('forgot_code_msg'))}" target="_blank" rel="noopener">${esc(t('forgot_code_short'))}</a>` : ''}</p></div>
+      <div style="min-width:110px"><input name="code" required placeholder="${esc(t('code'))}: D1600" autocomplete="off" autocapitalize="characters"></div><button class="sec">${esc(t('login_btn'))}</button></form><p class="muted" style="font-size:14px;margin:6px 0 0">${esc(t('login_rules'))} <a href="/forgot">${esc(t('forgot_code_short'))}</a></p></div>
     ${steps(t, 1)}<div class="card">
     <h1>${esc(t('hero_title'))}</h1><p class="muted">${esc(t('hero_sub'))}</p>
     <form method="post" action="/register">
@@ -323,7 +323,7 @@ app.get('/cabinet', (req, res) => {
       <form method="post" action="/cabinet/login"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required placeholder="+7 747 123 45 67" autocomplete="tel">
       <label>${esc(t('code'))}</label><input name="code" required placeholder="D1600" autocomplete="off" autocapitalize="characters">
       <p><button>${esc(t('login_btn'))}</button></p></form>
-      ${setting('whatsapp') ? `<p class="muted" style="font-size:14px">${esc(t('forgot_code'))} <a href="https://wa.me/${esc(setting('whatsapp'))}?text=${encodeURIComponent(t('forgot_code_msg'))}" target="_blank" rel="noopener">WhatsApp</a></p>` : ''}
+      <p style="font-size:14px"><a href="/forgot">${esc(t('forgot_code_short'))}</a></p>
       <a href="/">${esc(t('get_code'))}</a></div>`);
   }
   const invoices = db.prepare('SELECT i.*, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i WHERE client_id = ? ORDER BY id DESC').all(client.id);
@@ -337,6 +337,24 @@ app.get('/cabinet', (req, res) => {
 
 // Не больше 10 неверных попыток за 15 минут с одного адреса — чтобы коды не перебирали.
 const loginFails = new Map();
+
+// Забыли код: клиент вводит свой номер и видит код. Те же 10 попыток за 15 минут, что и при входе.
+const forgotHits = new Map();
+const forgotPage = (req, inner) => req.res.render(req.t('forgot_title'), `<div class="card" style="max-width:420px;margin:0 auto"><h1>${esc(req.t('forgot_title'))}</h1>${inner}</div>`);
+const forgotForm = (t, phone = '') => `<p class="muted">${esc(t('forgot_hint'))}</p><form method="post" action="/forgot"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required placeholder="+7 747 123 45 67" autocomplete="tel" value="${esc(phone)}"><p><button>${esc(t('forgot_btn'))}</button></p></form>`;
+app.get('/forgot', (req, res) => forgotPage(req, forgotForm(req.t)));
+app.post('/forgot', (req, res) => {
+  const t = req.t; const ip = req.ip; const now = Date.now();
+  const f = forgotHits.get(ip);
+  if (f && f.until > now && f.n >= 10) return forgotPage(req, `<div class="alert err">${esc(t('login_many'))}</div>`);
+  forgotHits.set(ip, { n: (f && f.until > now ? f.n : 0) + 1, until: f && f.until > now ? f.until : now + 15 * 60 * 1000 });
+  const phone = normPhone(req.body.phone);
+  const c = phone.length >= 10 && db.prepare('SELECT phone, code FROM clients WHERE phone = ?').get(phone);
+  if (!c) return forgotPage(req, `<div class="alert err">${esc(t('forgot_none'))}</div>${forgotForm(t, req.body.phone)}<a href="/">${esc(t('get_code'))}</a>`);
+  const shown = /^\d+$/.test(c.code) ? `D${c.code}` : c.code;
+  forgotPage(req, `<p class="muted">${esc(t('forgot_found'))}</p><div class="code">${esc(shown)}</div>
+    <form method="post" action="/cabinet/login"><input type="hidden" name="phone" value="${esc(c.phone)}"><input type="hidden" name="code" value="${esc(c.code)}"><p><button>${esc(t('login_btn'))}</button></p></form>`);
+});
 app.post('/cabinet/login', (req, res) => {
   const ip = req.ip; const now = Date.now();
   const f = loginFails.get(ip);
