@@ -21,7 +21,7 @@ const isOwner = (req) => req.session.admin === 'owner';
 const ALL = ROLES; const MONEY = ['owner', 'accountant']; const OWNER = ['owner'];
 const ACL = [
   [/^(GET|POST) \/(settings|backup)/, OWNER], [/^POST \/clients\/(import|add)$/, OWNER], [/^POST \/invoices\/\d+\/delete$/, OWNER],
-  [/^GET \/log/, OWNER], [/^POST \/invoices\/\d+\/payments\/\d+\/delete$/, OWNER],
+  [/^GET \/(log|daily)/, OWNER], [/^POST \/invoices\/\d+\/payments\/\d+\/delete$/, OWNER],
   [/^GET \/photos$/, ALL],
   [/^POST \/import-scan$/, ALL], [/^POST \/invoices\/\d+\/photos(\/\d+\/delete)?$/, ALL],
 ];
@@ -613,7 +613,7 @@ app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
 
 // ---------- Админка ----------
 
-const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/debts', 'a_debts'], ['/admin/forward', 'a_forward'], ['/admin/report', 'a_report'], ['/admin/news', 'a_news'], ['/admin/settings', 'a_settings'], ['/admin/log', 'a_log']];
+const ADMIN_TABS = [['/admin', 'a_dashboard'], ['/admin/clients', 'a_clients'], ['/admin/parcels', 'a_parcels'], ['/admin/import', 'a_import'], ['/admin/invoices', 'a_invoices'], ['/admin/debts', 'a_debts'], ['/admin/forward', 'a_forward'], ['/admin/report', 'a_report'], ['/admin/news', 'a_news'], ['/admin/settings', 'a_settings'], ['/admin/daily', 'a_daily'], ['/admin/log', 'a_log']];
 function adminRender(req, res, title, body) {
   const role = `<span class="badge" style="margin-left:auto">${esc(req.session.staffName ? `${req.session.staffName} · ` : '')}${esc(req.t('role_' + req.session.admin))}</span>`;
   const list = photosOnly(req) ? [['/admin/photos', 'a_scale_photos']] : ADMIN_TABS.filter(([h]) => can(req, 'GET', h.slice(6) || '/'));
@@ -1363,6 +1363,41 @@ app.get('/admin/debts', (req, res) => {
       ${owner ? `<td>${isStub(r) ? '' : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}
       <td><a href="/admin/invoices?q=${encodeURIComponent(dispCode(r.code))}&paid=0">${r.n}</a></td><td><b style="color:var(--brand)">${esc(money(r.debt))}</b></td>
       <td>${esc(fmtDay(r.oldest))}${days > 0 ? ` <span class="muted">· ${days} ${esc(t('a_days'))}</span>` : ''}</td></tr>`; }).join('')}</table>` : `<p class="muted">${esc(t('a_rep_no_debts'))}</p>`}</div>`);
+});
+
+// ---------- По дням (владелец): сколько отправили и сколько денег приняли каждый день ----------
+app.get('/admin/daily', (req, res) => {
+  const t = req.t;
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.m || '')) ? req.query.m : new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 7);
+  const DAY = "COALESCE(NULLIF(inv_date, ''), substr(created_at, 1, 10))";
+  const days = {};
+  const at = (d) => (days[d] ||= { n: 0, w: 0, v: 0, a: 0, arr: 0, del: 0, pay: {} });
+  for (const r of db.prepare(`SELECT ${DAY} d, COUNT(*) n, SUM(total_weight) w, SUM(volume) v, SUM(amount) a FROM invoices WHERE substr(${DAY}, 1, 7) = ? GROUP BY d`).all(month)) Object.assign(at(r.d), { n: r.n, w: r.w || 0, v: r.v || 0, a: r.a || 0 });
+  for (const r of db.prepare("SELECT date(arrived_at, '+5 hours') d, COUNT(*) n FROM invoices WHERE substr(date(arrived_at, '+5 hours'), 1, 7) = ? GROUP BY d").all(month)) at(r.d).arr = r.n;
+  for (const r of db.prepare("SELECT date(delivered_at, '+5 hours') d, COUNT(*) n FROM invoices WHERE substr(date(delivered_at, '+5 hours'), 1, 7) = ? GROUP BY d").all(month)) at(r.d).del = r.n;
+  // Деньги по способу: наличные Алматы / Москва, юани, перевод; «Оплачено» галочкой — отдельно, город по пункту назначения.
+  for (const r of db.prepare("SELECT date(p.created_at, '+5 hours') d, p.method m, i.destination dest, SUM(p.amount) s FROM payments p JOIN invoices i ON i.id = p.invoice_id WHERE substr(date(p.created_at, '+5 hours'), 1, 7) = ? GROUP BY d, m, dest").all(month)) {
+    const m = r.m === 'auto' || r.m === 'cash' ? (isMsk(r.dest) ? 'cash_msk' : 'cash_ala') : PAY_METHODS.includes(r.m) ? r.m : 'other';
+    const p = at(r.d).pay; p[m] = (p[m] || 0) + r.s;
+  }
+  const list = Object.keys(days).sort().reverse();
+  const tot = list.reduce((o, d) => { const x = days[d]; ['n', 'w', 'v', 'a', 'arr', 'del'].forEach((k) => { o[k] += x[k]; }); for (const [m, v] of Object.entries(x.pay)) o.pay[m] = (o.pay[m] || 0) + v; return o; }, { n: 0, w: 0, v: 0, a: 0, arr: 0, del: 0, pay: {} });
+  const kg = (w) => `${num(Math.round(w))} кг${w >= 1000 ? ` <span class="muted">· ${num(Math.round(w / 100) / 10)} т</span>` : ''}`;
+  const m$ = (v) => (v ? esc(money(v)) : '<span class="muted">—</span>');
+  const payT = (p) => Object.values(p).reduce((a, b) => a + b, 0);
+  // Колонки способов оплаты — только те, что были в этом месяце.
+  const used = PAY_METHODS.filter((m) => tot.pay[m]);
+  const row = (label, x, cls = '') => `<tr class="${cls}"><td style="white-space:nowrap"><b>${label}</b></td><td>${x.n || '—'}</td><td style="white-space:nowrap">${x.w ? kg(x.w) : '—'}</td><td style="white-space:nowrap">${x.v ? num(Math.round(x.v * 100) / 100) + ' м³' : '—'}</td>
+    <td style="white-space:nowrap">${m$(x.a)}</td><td>${x.arr || '—'}</td><td>${x.del || '—'}</td><td style="white-space:nowrap"><b style="color:var(--ok)">${m$(payT(x.pay))}</b></td>${used.map((m) => `<td style="white-space:nowrap">${m$(x.pay[m])}</td>`).join('')}</tr>`;
+  const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
+  const yest = new Date(Date.now() + 5 * 3600e3 - 86400e3).toISOString().slice(0, 10);
+  const name = (d) => `${fmtDay(d)}${d === today ? ` · ${t('a_today').toLowerCase()}` : d === yest ? ` · ${t('a_yesterday')}` : ''}`;
+  const y = days[yest];
+  adminRender(req, res, t('a_daily'), `<div class="card"><form class="row" style="align-items:flex-end"><div><label>${esc(t('a_month'))}</label><input type="month" name="m" value="${month}"></div><button style="flex:0 0 auto">${esc(t('a_show'))}</button></form>
+    ${y ? `<p style="margin:12px 0 0;font-size:17px">${esc(t('a_yesterday_cap'))}: ${esc(t('a_sum_sent').toLowerCase())} <b>${y.n}</b> ${esc(t('a_f_pcs'))}, <b>${kg(y.w)}</b>, ${num(Math.round(y.v * 100) / 100)} м³ · ${esc(t('a_sum_got').toLowerCase())} <b style="color:var(--ok)">${esc(money(payT(y.pay)))}</b>${PAY_METHODS.filter((m) => y.pay[m]).map((m) => ` <span class="muted">(${esc(t('pay_' + m))}: ${esc(money(y.pay[m]))})</span>`).join('')}</p>` : ''}</div>
+    <div class="card tbl">${list.length ? `<table><tr><th>${esc(t('date'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_h_weight'))}</th><th>${esc(t('a_h_volume'))}</th><th>${esc(t('a_charged'))}</th><th>${esc(t('a_h_arrived'))}</th><th>${esc(t('a_h_delivered'))}</th>
+      <th>${esc(t('a_sum_got'))}</th>${used.map((m) => `<th>${esc(t('pay_' + m))}</th>`).join('')}</tr>
+      ${row(esc(t('a_month_total')), tot, 'dayrow')}${list.map((d) => row(esc(name(d)), days[d])).join('')}</table>` : `<p class="muted">${esc(t('a_log_empty'))}</p>`}</div>`);
 });
 
 // ---------- Журнал действий (владелец) ----------
