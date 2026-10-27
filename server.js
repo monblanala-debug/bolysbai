@@ -292,6 +292,7 @@ function setPaid(req, id, v) {
   }
 }
 // Заметка о клиенте для сотрудников: видна рядом с клиентом везде в админке, клиенту — никогда.
+const noteBy = (t, i) => `${ROLES.includes(i.staff_note_by) ? t('role_' + i.staff_note_by) : i.staff_note_by || ''}${i.staff_note_at ? ` · ${utcToAlmaty(i.staff_note_at).slice(5).replace(/^(\d\d)-(\d\d)/, '$2.$1')}` : ''}`;
 const noteTag = (note) => (note ? `<div class="staff-note">📝 ${esc(note)}</div>` : '');
 
 // Этапы: пройденные — с датой, текущий выделен, будущие — серые и без дат (сроки не обещаем).
@@ -377,19 +378,23 @@ function invoicesTable(t, invoices, base, withPaid = true, canDelete = false) {
       <b style="font-size:20px;color:var(--brand);text-align:right">${esc(money(i.amount))}</b></div>
     <a class="btn sec" style="display:block;text-align:center;margin-top:10px" href="${base}${i.id}">${esc(t('inv_view'))}</a></div>`).join('')}</div>`;
   // Галочки привязаны к отдельной форме (form="bulkinv"), потому что в строках уже есть формы загрузки фото.
-  return `<div class="tbl"><table><tr><th><input type="checkbox" id="inv-all" style="width:auto"></th><th>${esc(t('date'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('inv_cargo'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th></tr>
+  return `<div class="tbl"><table><tr><th><input type="checkbox" id="inv-all" style="width:auto"></th><th>${esc(t('invoice_no'))}</th><th>${esc(t('inv_cargo'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th><th>✎ ${esc(t('a_inv_note'))}</th></tr>
   ${invoices.map((i, n) => { const d = i.day || String(i.inv_date || i.created_at || '').slice(0, 10); const head = n === 0 || d !== (invoices[n - 1].day || String(invoices[n - 1].inv_date || invoices[n - 1].created_at || '').slice(0, 10));
     const cnt = head ? invoices.filter((x) => (x.day || String(x.inv_date || x.created_at || '').slice(0, 10)) === d).length : 0;
-    return `${head ? `<tr class="dayrow"><td><input type="checkbox" class="day-all" data-day="${esc(d)}" style="width:auto"></td><td colspan="6"><b>${esc(fmtDay(d))}</b> <span class="muted">· ${cnt} ${esc(t('a_f_pcs'))}</span></td></tr>` : ''}<tr><td><input type="checkbox" name="ids" value="${i.id}" data-day="${esc(d)}" form="bulkinv" style="width:auto"></td><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b style="white-space:nowrap">${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}${noteTag(i.client_note)}</td>
-  <td>${esc(cargoSummary(t, i))}${i.staff_note ? `<div class="staff-note">✎ ${esc(i.staff_note)}</div>` : ''}</td><td><b>${esc(money(i.amount))}</b></td>
-  <td><div style="margin-bottom:4px">${invBadge(t, i)}</div>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${payBadge(t, i)}</td>
-  <td style="white-space:nowrap"><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a> ${photoForm(t, i.id, '/admin/invoices')}${i.pc ? ` <span class="muted">📷 ${i.pc}</span>` : ''}</td></tr>`; }).join('')}</table></div>
+    return `${head ? `<tr class="dayrow"><td><input type="checkbox" class="day-all" data-day="${esc(d)}" style="width:auto"></td><td colspan="6"><b>${esc(fmtDay(d))}</b> <span class="muted">· ${cnt} ${esc(t('a_f_pcs'))}</span></td></tr>` : ''}<tr><td><input type="checkbox" name="ids" value="${i.id}" data-day="${esc(d)}" form="bulkinv" style="width:auto"></td><td><b style="white-space:nowrap">${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}${noteTag(i.client_note)}</td>
+  <td>${esc(cargoSummary(t, i))}</td><td style="white-space:nowrap"><b>${esc(money(i.amount))}</b></td>
+  <td style="min-width:170px"><div style="margin-bottom:4px">${invBadge(t, i)}</div>
+    <form method="post" action="/admin/invoices/${i.id}/status" style="margin-bottom:4px"><input type="hidden" name="back" class="back"><select name="inv_status" onchange="this.form.submit()" class="rowsel" title="${esc(t('a_set_status'))}">${invStatusOptions(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'auto')}</select></form>
+    ${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${payBadge(t, i)}</td>
+  <td><div style="display:grid;gap:6px"><a class="btn sec sm" href="${base}${i.id}">${esc(t('a_open'))}</a>${photoForm(t, i.id, '/admin/invoices')}${i.pc ? `<span class="muted">📷 ${i.pc}</span>` : ''}</div></td>
+  <td><form method="post" action="/admin/invoices/${i.id}/note" class="rownote"><input type="hidden" name="back" class="back"><textarea name="staff_note" rows="2" placeholder="${esc(t('a_inv_note_short'))}">${esc(i.staff_note || '')}</textarea>
+    <div class="row" style="align-items:center;gap:6px;margin-top:4px"><button class="sec sm" style="flex:0 0 auto">${esc(t('save'))}</button>${i.staff_note ? `<span class="muted" style="font-size:12px">${esc(noteBy(t, i))}</span>` : ''}</div></form></td></tr>`; }).join('')}</table></div>
   <form method="post" action="/admin/invoices/bulk" id="bulkinv" class="row" style="margin-top:12px"><input type="hidden" name="back" id="inv-back"><div><label>${esc(t('a_bulk_inv'))}</label><select name="inv_status"><option value="">— ${esc(t('a_no_change'))} —</option>${invStatusOptions(t, '')}</select></div>
     ${withPaid ? `<div><label>${esc(t('paid'))}</label><select name="paid"><option value="">—</option><option value="1">${esc(t('paid'))}</option><option value="0">${esc(t('unpaid'))}</option></select></div>` : ''}
     <button>${esc(t('apply'))}</button>${canDelete ? `<button class="sec" name="del" value="1" onclick="return confirm('${esc(t('a_bulk_del_confirm'))}')">${esc(t('a_bulk_del'))}</button>` : ''}</form>
   <script>document.getElementById('inv-all').addEventListener('change',(e)=>document.querySelectorAll('input[form=bulkinv][name=ids],.day-all').forEach((c)=>c.checked=e.target.checked));
 document.querySelectorAll('.day-all').forEach((d)=>d.addEventListener('change',()=>document.querySelectorAll('input[form=bulkinv][name=ids][data-day="'+d.dataset.day+'"]').forEach((c)=>c.checked=d.checked)));
-document.getElementById('inv-back').value=location.pathname+location.search</script>${PHOTO_JS}`;
+document.getElementById('inv-back').value=location.pathname+location.search;document.querySelectorAll('input.back').forEach((b)=>b.value=location.pathname+location.search)</script>${PHOTO_JS}`;
 }
 
 // Мои трек-номера: клиент добавляет треки заранее; когда склад отсканирует коробку, тут появятся фото и «Принят на складе».
@@ -1231,7 +1236,7 @@ app.get('/admin/invoices/:id', (req, res) => {
       <div style="flex:2 1 200px"><label>${esc(t('note'))}</label><input name="note" maxlength="200" placeholder="${esc(t('a_pay_note_ph'))}"></div><button style="flex:0 0 auto">${esc(t('a_pay_add'))}</button></form>` : ''}</div>` : '';
   const notes = `<div class="card noprint">${cl.note ? `<div class="staff-note" style="font-size:15px;margin:0 0 10px">📝 <a href="/admin/clients/${cl.id}">${esc(dispCode(cl.code))}</a>: ${esc(cl.note)}</div>` : ''}
     <form method="post" action="/admin/invoices/${inv.id}/note"><label>✎ ${esc(t('a_inv_note'))} <span class="muted" style="font-weight:400">· ${esc(t('a_note_hidden'))}</span></label>
-    <textarea name="staff_note" rows="2" placeholder="${esc(t('a_inv_note_ph'))}">${esc(inv.staff_note || '')}</textarea><p style="margin:8px 0 0"><button class="sec">${esc(t('save'))}</button></p></form></div>`;
+    <textarea name="staff_note" rows="2" placeholder="${esc(t('a_inv_note_ph'))}">${esc(inv.staff_note || '')}</textarea><p style="margin:8px 0 0"><button class="sec">${esc(t('save'))}</button>${inv.staff_note ? ` <span class="muted" style="font-size:13px">${esc(noteBy(t, inv))}</span>` : ''}</p></form></div>`;
   adminRender(req, res, inv.number, `${money2}${notes}${invoicePage(req, inv)}<div class="row noprint" style="gap:8px">
     ${canMoney(req) ? `<form method="post" action="/admin/invoices/${inv.id}/paid" style="flex:0 0 auto"><input type="hidden" name="paid" value="${inv.paid ? 0 : 1}"><button class="sec">${esc(inv.paid ? t('unpaid') : t('a_mark_paid'))}</button></form>
     <a class="btn sec" style="flex:0 0 auto" href="/admin/invoices/${inv.id}/edit">${esc(t('edit'))}</a>` : ''}
@@ -1336,10 +1341,17 @@ app.post('/admin/invoices/:id/payments/:pid/delete', (req, res) => {
   if (inv && paidSum(id) < (inv.amount || 0) - 0.01) db.prepare('UPDATE invoices SET paid = 0 WHERE id = ?').run(id);
   res.redirect(`/admin/invoices/${id}`);
 });
+// Из списка накладных — обратно в список с тем же фильтром, со страницы накладной — на неё.
+const rowBack = (req, id) => (/^\/admin\/invoices(\?[^\\]*)?$/.test(String(req.body.back || '')) ? req.body.back : `/admin/invoices/${id}`);
 app.post('/admin/invoices/:id/note', (req, res) => {
   const id = parseInt(req.params.id, 10);
-  db.prepare('UPDATE invoices SET staff_note = ? WHERE id = ?').run(String(req.body.staff_note || '').trim().slice(0, 500), id);
-  res.redirect(`/admin/invoices/${id}`);
+  db.prepare('UPDATE invoices SET staff_note = ?, staff_note_by = ?, staff_note_at = datetime(\'now\') WHERE id = ?').run(String(req.body.staff_note || '').trim().slice(0, 500), staffWho(req) || req.session.admin, id);
+  res.redirect(rowBack(req, id));
+});
+app.post('/admin/invoices/:id/status', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (INV_STATUSES.includes(req.body.inv_status)) db.prepare('UPDATE invoices SET inv_status = ? WHERE id = ?').run(req.body.inv_status, id);
+  res.redirect(rowBack(req, id));
 });
 app.post('/admin/clients/:id/note', (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -1407,6 +1419,7 @@ const LOG_RULES = [
   [/^\/invoices\/(\d+)\/payments$/, 'log_pay_add'],
   [/^\/invoices\/(\d+)\/paid$/, (b) => (b.paid === '1' ? 'log_inv_paid' : 'log_inv_unpaid')],
   [/^\/invoices\/(\d+)\/note$/, 'log_inv_note'],
+  [/^\/invoices\/(\d+)\/status$/, 'log_inv_status'],
   [/^\/invoices\/(\d+)\/delete$/, 'log_inv_del'],
   [/^\/invoices\/(\d+)\/photos/, 'log_photo'],
   [/^\/invoices\/(\d+)$/, 'log_inv_edit'],

@@ -159,6 +159,8 @@ for (const [table, col, def] of [
   // Заметки для сотрудников (клиент не видит) и когда груз прибыл / выдан — для сводки.
   ['clients', 'note', "TEXT DEFAULT ''"],
   ['invoices', 'staff_note', "TEXT DEFAULT ''"],
+  ['invoices', 'staff_note_by', "TEXT DEFAULT ''"],
+  ['invoices', 'staff_note_at', 'TEXT'],
   ['invoices', 'arrived_at', 'TEXT'],
   ['invoices', 'delivered_at', 'TEXT'],
 ]) {
