@@ -20,7 +20,7 @@ button,.btn{display:inline-block;background:var(--brand);color:var(--brand-ink);
 .btn.sec,button.sec{background:#eef0f3;color:var(--ink)}.btn.sm,button.sm{padding:6px 10px;font-size:13px}
 .row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.row>*{flex:1;min-width:140px}.row>button,.row>.btn{flex:0 0 auto}
 table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}
-.tbl{overflow-x:auto}
+.tbl{overflow-x:auto}.dayrow td{background:#f6f1f1;border-top:2px solid var(--line)}
 .code{font-family:ui-monospace,Menlo,monospace;font-size:28px;font-weight:800;letter-spacing:1px;color:var(--brand)}
 .addr{background:#fafafa;border:1px dashed #cbd5e1;border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
 .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#eef0f3}

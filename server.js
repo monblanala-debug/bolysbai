@@ -341,14 +341,18 @@ function invoicesTable(t, invoices, base, withPaid = true, canDelete = false) {
     <a class="btn sec" style="display:block;text-align:center;margin-top:10px" href="${base}${i.id}">${esc(t('inv_view'))}</a></div>`).join('')}</div>`;
   // Галочки привязаны к отдельной форме (form="bulkinv"), потому что в строках уже есть формы загрузки фото.
   return `<div class="tbl"><table><tr><th><input type="checkbox" id="inv-all" style="width:auto"></th><th>${esc(t('date'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('inv_cargo'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th></tr>
-  ${invoices.map((i) => `<tr><td><input type="checkbox" name="ids" value="${i.id}" form="bulkinv" style="width:auto"></td><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b>${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}</td>
+  ${invoices.map((i, n) => { const d = i.day || String(i.inv_date || i.created_at || '').slice(0, 10); const head = n === 0 || d !== (invoices[n - 1].day || String(invoices[n - 1].inv_date || invoices[n - 1].created_at || '').slice(0, 10));
+    const cnt = head ? invoices.filter((x) => (x.day || String(x.inv_date || x.created_at || '').slice(0, 10)) === d).length : 0;
+    return `${head ? `<tr class="dayrow"><td><input type="checkbox" class="day-all" data-day="${esc(d)}" style="width:auto"></td><td colspan="6"><b>${esc(fmtDay(d))}</b> <span class="muted">· ${cnt} ${esc(t('a_f_pcs'))}</span></td></tr>` : ''}<tr><td><input type="checkbox" name="ids" value="${i.id}" data-day="${esc(d)}" form="bulkinv" style="width:auto"></td><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b style="white-space:nowrap">${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}</td>
   <td>${esc(cargoSummary(t, i))}</td><td><b>${esc(money(i.amount))}</b></td>
   <td><div style="margin-bottom:4px">${invBadge(t, i)}</div>${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${i.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</td>
-  <td style="white-space:nowrap"><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a> ${photoForm(t, i.id, '/admin/invoices')}${i.pc ? ` <span class="muted">📷 ${i.pc}</span>` : ''}</td></tr>`).join('')}</table></div>
-  <form method="post" action="/admin/invoices/bulk" id="bulkinv" class="row" style="margin-top:12px"><div><label>${esc(t('a_bulk_inv'))}</label><select name="inv_status">${invStatusOptions(t, 'arrived')}</select></div>
+  <td style="white-space:nowrap"><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a> ${photoForm(t, i.id, '/admin/invoices')}${i.pc ? ` <span class="muted">📷 ${i.pc}</span>` : ''}</td></tr>`; }).join('')}</table></div>
+  <form method="post" action="/admin/invoices/bulk" id="bulkinv" class="row" style="margin-top:12px"><input type="hidden" name="back" id="inv-back"><div><label>${esc(t('a_bulk_inv'))}</label><select name="inv_status">${invStatusOptions(t, 'arrived')}</select></div>
     ${withPaid ? `<div><label>${esc(t('paid'))}</label><select name="paid"><option value="">—</option><option value="1">${esc(t('paid'))}</option><option value="0">${esc(t('unpaid'))}</option></select></div>` : ''}
     <button>${esc(t('apply'))}</button>${canDelete ? `<button class="sec" name="del" value="1" onclick="return confirm('${esc(t('a_bulk_del_confirm'))}')">${esc(t('a_bulk_del'))}</button>` : ''}</form>
-  <script>document.getElementById('inv-all').addEventListener('change',(e)=>document.querySelectorAll('input[form=bulkinv][name=ids]').forEach((c)=>c.checked=e.target.checked))</script>${PHOTO_JS}`;
+  <script>document.getElementById('inv-all').addEventListener('change',(e)=>document.querySelectorAll('input[form=bulkinv][name=ids],.day-all').forEach((c)=>c.checked=e.target.checked));
+document.querySelectorAll('.day-all').forEach((d)=>d.addEventListener('change',()=>document.querySelectorAll('input[form=bulkinv][name=ids][data-day="'+d.dataset.day+'"]').forEach((c)=>c.checked=d.checked)));
+document.getElementById('inv-back').value=location.pathname+location.search</script>${PHOTO_JS}`;
 }
 
 // Мои трек-номера: клиент добавляет треки заранее; когда склад отсканирует коробку, тут появятся фото и «Принят на складе».
@@ -1015,8 +1019,31 @@ function importInvoices(req, res) {
 
 app.get('/admin/invoices', (req, res) => {
   const t = req.t;
-  const invoices = db.prepare(`SELECT i.*, c.code, c.name, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i JOIN clients c ON c.id = i.client_id ORDER BY i.id DESC LIMIT 300`).all();
+  // Фильтр для бухгалтера: поиск по коду/номеру/имени, дата отправки, этап, оплата.
+  const f = { q: String(req.query.q || '').trim().slice(0, 60), day: /^\d{4}-\d{2}-\d{2}$/.test(req.query.day || '') ? req.query.day : '', st: ['transit', 'arrived', 'delivered'].includes(req.query.st) ? req.query.st : '', paid: ['0', '1'].includes(req.query.paid) ? req.query.paid : '' };
+  const DAY = "COALESCE(NULLIF(i.inv_date, ''), substr(i.created_at, 1, 10))";
+  const where = []; const args = [];
+  if (f.q.includes('-')) { where.push('i.number LIKE ?'); args.push(`%${f.q}%`); } else if (f.q) {
+    const key = codeKey(f.q);
+    where.push('(i.number LIKE ? OR c.code = ? OR c.code = ? OR c.name LIKE ?)'); args.push(`%${f.q}%`, key, f.q.toUpperCase(), `%${f.q}%`);
+  }
+  if (f.day) { where.push(`${DAY} = ?`); args.push(f.day); }
+  if (f.paid) { where.push('i.paid = ?'); args.push(+f.paid); }
+  const filtered = f.q || f.day || f.st || f.paid;
+  let invoices = db.prepare(`SELECT i.*, c.code, c.name, ${DAY} day, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i JOIN clients c ON c.id = i.client_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY day DESC, i.id DESC LIMIT ${filtered ? 2000 : 300}`).all(...args);
+  if (f.st) invoices = invoices.filter((i) => { const s = invStage(i); return f.st === 'transit' ? s !== 'arrived' && s !== 'delivered' : s === f.st; });
+  const days = db.prepare(`SELECT ${DAY} d, COUNT(*) n FROM invoices i GROUP BY d ORDER BY d DESC LIMIT 90`).all();
+  const opt = (v, cur, label) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(label)}</option>`;
+  const filter = `<form method="get" class="row" style="align-items:flex-end">
+    <div style="flex:2 1 200px"><label>${esc(t('a_f_search'))}</label><input name="q" value="${esc(f.q)}" placeholder="D1600, 9866-1024-4"></div>
+    <div><label>${esc(t('a_f_day'))}</label><select name="day">${opt('', f.day, t('a_f_all_days'))}${days.map((d) => opt(d.d, f.day, `${fmtDay(d.d)} · ${d.n}`)).join('')}</select></div>
+    <div><label>${esc(t('status'))}</label><select name="st">${opt('', f.st, t('a_f_all'))}${opt('transit', f.st, t('a_f_transit'))}${opt('arrived', f.st, t('ist_arrived'))}${opt('delivered', f.st, t('ist_delivered'))}</select></div>
+    ${canMoney(req) ? `<div><label>${esc(t('paid'))}</label><select name="paid">${opt('', f.paid, t('a_f_all'))}${opt('0', f.paid, t('unpaid'))}${opt('1', f.paid, t('paid'))}</select></div>` : ''}
+    <button style="flex:0 0 auto">${esc(t('a_f_show'))}</button>${filtered ? `<a class="btn sec" style="flex:0 0 auto" href="/admin/invoices">${esc(t('a_f_reset'))}</a>` : ''}</form>
+    ${filtered ? `<p class="muted" style="margin:8px 0 0">${esc(t('a_f_found'))}: ${invoices.length}</p>` : ''}`;
   adminRender(req, res, t('a_invoices'), `${canMoney(req) ? `<div class="card"><form method="get" action="/admin/invoices/new" class="row"><div><label>${esc(t('a_pick_client'))}</label><input name="code" required placeholder="D1600"></div><button>${esc(t('a_new_invoice'))}</button><a class="btn sec" href="/admin/import#inv">${esc(t('a_inv_import'))}</a></form></div>` : ''}
+  <div class="card">${filter}</div>
   <div class="card">${invoicesTable(t, invoices, '/admin/invoices/', canMoney(req), isOwner(req))}</div>`);
 });
 
@@ -1139,6 +1166,8 @@ app.get('/admin/invoices/:id/edit', (req, res) => {
   adminRender(req, res, inv.number, invoiceForm(req, getClient(inv.client_id), inv));
 });
 
+// После массового действия — обратно на тот же фильтр.
+const invBack = (req) => (/^\/admin\/invoices(\?[^\\]*)?$/.test(String(req.body.back || '')) ? req.body.back : '/admin/invoices');
 app.post('/admin/invoices/bulk', (req, res) => {
   const ids = [].concat(req.body.ids || []).map((x) => parseInt(x, 10)).filter(Boolean);
   const st = INV_STATUSES.includes(req.body.inv_status) ? req.body.inv_status : null;
@@ -1154,13 +1183,13 @@ app.post('/admin/invoices/bulk', (req, res) => {
     }
     db.exec('COMMIT');
     req.session.flash = `${req.t('a_bulk_deleted')}: ${ids.length}`;
-    return res.redirect('/admin/invoices');
+    return res.redirect(invBack(req));
   }
   db.exec('BEGIN');
   for (const id of ids) db.prepare('UPDATE invoices SET inv_status = COALESCE(?, inv_status), paid = COALESCE(?, paid) WHERE id = ?').run(st, paid, id);
   db.exec('COMMIT');
   req.session.flash = `${req.t('saved')}: ${ids.length}`;
-  res.redirect('/admin/invoices');
+  res.redirect(invBack(req));
 });
 
 app.post('/admin/invoices/:id', (req, res) => {
