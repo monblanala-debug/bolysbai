@@ -1762,16 +1762,17 @@ app.get('/admin/report', (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.m || '')) ? req.query.m : new Date().toISOString().slice(0, 7);
   const { tot, byDest, debts, lost } = reportData(month);
   const card = (k, v) => `<div class="card"><div class="muted">${esc(t(k))}</div><div class="stat">${v}</div></div>`;
+  const own = isOwner(req); // места, вес и объём за месяц видит только владелец, бухгалтеру — суммы
   adminRender(req, res, t('a_report'), `<div class="card"><form class="row" style="align-items:flex-end"><div><label>${esc(t('a_month'))}</label><input type="month" name="m" value="${month}"></div><button>${esc(t('a_show'))}</button>
     <a class="btn sec" href="/admin/report.xlsx?m=${month}">⬇ Excel</a></form></div>
-    <div class="grid g4">${card('a_rep_invoices', tot.count)}${card('a_rep_pieces', tot.pieces)}${card('a_rep_weight', num(r2(tot.weight)) + ' кг')}${card('a_rep_volume', num(tot.volume) + ' м³')}</div>
-    <div class="grid g4">${card('a_rep_amount', money(tot.amount))}${card('a_rep_paid', money(tot.paid))}${card('a_rep_unpaid', money(tot.unpaid))}</div>
-    <div class="card tbl"><h2>${esc(t('a_rep_by_dest'))}</h2><table><tr><th>${esc(t('a_rep_dest'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('a_rep_volume'))}</th><th>${esc(t('a_rep_amount'))}</th></tr>
-    ${Object.entries(byDest).map(([d, o]) => `<tr><td>${esc(d)}</td><td>${o.count}</td><td>${num(r2(o.weight))}</td><td>${num(o.volume)}</td><td>${money(o.amount)}</td></tr>`).join('')}</table></div>
+    ${own ? `<div class="grid g4">${card('a_rep_invoices', tot.count)}${card('a_rep_pieces', tot.pieces)}${card('a_rep_weight', num(r2(tot.weight)) + ' кг')}${card('a_rep_volume', num(tot.volume) + ' м³')}</div>` : ''}
+    <div class="grid g4">${own ? '' : card('a_rep_invoices', tot.count)}${card('a_rep_amount', money(tot.amount))}${card('a_rep_paid', money(tot.paid))}${card('a_rep_unpaid', money(tot.unpaid))}</div>
+    <div class="card tbl"><h2>${esc(t('a_rep_by_dest'))}</h2><table><tr><th>${esc(t('a_rep_dest'))}</th><th>${esc(t('a_rep_invoices'))}</th>${own ? `<th>${esc(t('weight'))}</th><th>${esc(t('a_rep_volume'))}</th>` : ''}<th>${esc(t('a_rep_amount'))}</th></tr>
+    ${Object.entries(byDest).map(([d, o]) => `<tr><td>${esc(d)}</td><td>${o.count}</td>${own ? `<td>${num(r2(o.weight))}</td><td>${num(o.volume)}</td>` : ''}<td>${money(o.amount)}</td></tr>`).join('')}</table></div>
     <div class="card tbl"><h2>${esc(t('a_rep_debts'))}</h2>${debts.length ? `<table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_rep_unpaid'))}</th></tr>
     ${debts.map((d) => `<tr><td><b>${esc(dispCode(d.code))}</b></td><td>${esc(d.name)}</td><td>${d.n}</td><td>${money(d.s)}</td></tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_rep_no_debts'))}</p>`}</div>
-    <div class="card tbl" id="lost"><h2>${esc(t('a_lost'))}</h2><p class="muted">${esc(t('a_lost_hint'))}</p>${lost.length ? `<table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_rep_amount'))}</th><th>${esc(t('a_lost_last'))}</th>${isOwner(req) ? '<th></th>' : ''}</tr>
-    ${lost.map((d) => `<tr><td><a href="/admin/clients/${d.id}"><b>${esc(dispCode(d.code))}</b></a></td><td>${esc(d.name)}</td><td>${d.n}</td><td>${money(d.s)}</td><td>${esc(fmtDay(d.last))}</td>${isOwner(req) ? `<td>${isStub(d) ? '' : `<a class="btn sec sm" href="https://wa.me/${esc(d.phone)}" target="_blank" rel="noopener">WhatsApp</a>`}</td>` : ''}</tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_lost_none'))}</p>`}</div>`);
+    ${own ? `<div class="card tbl" id="lost"><h2>${esc(t('a_lost'))}</h2><p class="muted">${esc(t('a_lost_hint'))}</p>${lost.length ? `<table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th><th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_rep_amount'))}</th><th>${esc(t('a_lost_last'))}</th><th></th></tr>
+    ${lost.map((d) => `<tr><td><a href="/admin/clients/${d.id}"><b>${esc(dispCode(d.code))}</b></a></td><td>${esc(d.name)}</td><td>${d.n}</td><td>${money(d.s)}</td><td>${esc(fmtDay(d.last))}</td><td>${isStub(d) ? '' : `<a class="btn sec sm" href="https://wa.me/${esc(d.phone)}" target="_blank" rel="noopener">WhatsApp</a>`}</td></tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_lost_none'))}</p>`}</div>` : ''}`);
 });
 app.get('/admin/report.xlsx', (req, res) => {
   const t = req.t;
@@ -1779,11 +1780,12 @@ app.get('/admin/report.xlsx', (req, res) => {
   const { inv, tot, byDest, debts } = reportData(month);
   const wb = XLSX.utils.book_new();
   const sheet = (rows, widths) => { const ws = XLSX.utils.aoa_to_sheet(rows); ws['!cols'] = widths.map((w) => ({ wch: w })); return ws; };
+  const own = isOwner(req);
   XLSX.utils.book_append_sheet(wb, sheet([[t('a_report'), month], [],
-    [t('a_rep_invoices'), tot.count], [t('a_rep_pieces'), tot.pieces], [t('a_rep_weight'), r2(tot.weight)], [t('a_rep_volume'), r2(tot.volume * 1000) / 1000],
+    [t('a_rep_invoices'), tot.count], ...(own ? [[t('a_rep_pieces'), tot.pieces], [t('a_rep_weight'), r2(tot.weight)], [t('a_rep_volume'), r2(tot.volume * 1000) / 1000]] : []),
     [t('a_rep_amount'), r2(tot.amount)], [t('a_rep_paid'), r2(tot.paid)], [t('a_rep_unpaid'), r2(tot.unpaid)], [],
-    [t('a_rep_dest'), t('a_rep_invoices'), t('weight'), t('a_rep_volume'), t('a_rep_amount')],
-    ...Object.entries(byDest).map(([d, o]) => [d, o.count, r2(o.weight), r2(o.volume * 1000) / 1000, r2(o.amount)])], [24, 14, 12, 12, 14]), t('a_rep_sheet_total').slice(0, 31));
+    own ? [t('a_rep_dest'), t('a_rep_invoices'), t('weight'), t('a_rep_volume'), t('a_rep_amount')] : [t('a_rep_dest'), t('a_rep_invoices'), t('a_rep_amount')],
+    ...Object.entries(byDest).map(([d, o]) => (own ? [d, o.count, r2(o.weight), r2(o.volume * 1000) / 1000, r2(o.amount)] : [d, o.count, r2(o.amount)]))], [24, 14, 12, 12, 14]), t('a_rep_sheet_total').slice(0, 31));
   XLSX.utils.book_append_sheet(wb, sheet([[t('date'), t('invoice_no'), t('code'), t('name'), t('a_rep_dest'), t('places'), t('weight'), t('a_rep_volume'), t('a_rep_amount'), t('a_rep_paid')],
     ...inv.map((i) => [fmtDay(i.inv_date || i.created_at), i.number, dispCode(i.code), i.name, DEST_RU[i.destination] || i.destination, i.pieces || 0, i.total_weight || 0, i.volume || 0, r2(i.amount || 0), i.paid ? '✓' : ''])], [11, 18, 9, 20, 14, 7, 9, 9, 11, 8]), t('a_invoices').slice(0, 31));
   XLSX.utils.book_append_sheet(wb, sheet([[t('code'), t('name'), t('a_rep_invoices'), t('a_rep_unpaid')], ...debts.map((d) => [dispCode(d.code), d.name, d.n, r2(d.s)])], [10, 24, 10, 14]), t('a_rep_debts').slice(0, 31));
