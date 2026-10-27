@@ -341,7 +341,7 @@ const loginFails = new Map();
 // Забыли код: клиент вводит свой номер и видит код. Те же 10 попыток за 15 минут, что и при входе.
 const forgotHits = new Map();
 const forgotPage = (req, inner) => req.res.render(req.t('forgot_title'), `<div class="card" style="max-width:420px;margin:0 auto"><h1>${esc(req.t('forgot_title'))}</h1>${inner}</div>`);
-const forgotForm = (t, phone = '') => `<p class="muted">${esc(t('forgot_hint'))}</p><form method="post" action="/forgot"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required placeholder="+7 747 123 45 67" autocomplete="tel" value="${esc(phone)}"><p><button>${esc(t('forgot_btn'))}</button></p></form>`;
+const forgotForm = (t, phone = '', name = '') => `<p class="muted">${esc(t('forgot_hint'))}</p><form method="post" action="/forgot"><label>${esc(t('phone'))}</label><input name="phone" type="tel" required placeholder="+7 747 123 45 67" autocomplete="tel" value="${esc(phone)}"><label>${esc(t('name'))}</label><input name="name" required autocomplete="given-name" value="${esc(name)}"><p><button>${esc(t('forgot_btn'))}</button></p></form>`;
 app.get('/forgot', (req, res) => forgotPage(req, forgotForm(req.t)));
 app.post('/forgot', (req, res) => {
   const t = req.t; const ip = req.ip; const now = Date.now();
@@ -349,8 +349,12 @@ app.post('/forgot', (req, res) => {
   if (f && f.until > now && f.n >= 10) return forgotPage(req, `<div class="alert err">${esc(t('login_many'))}</div>`);
   forgotHits.set(ip, { n: (f && f.until > now ? f.n : 0) + 1, until: f && f.until > now ? f.until : now + 15 * 60 * 1000 });
   const phone = normPhone(req.body.phone);
-  const c = phone.length >= 10 && db.prepare('SELECT phone, code FROM clients WHERE phone = ?').get(phone);
-  if (!c) return forgotPage(req, `<div class="alert err">${esc(t('forgot_none'))}</div>${forgotForm(t, req.body.phone)}<a href="/">${esc(t('get_code'))}</a>`);
+  // Код показываем, только если имя совпало с тем, что клиент писал при регистрации (целиком или одно из слов), — чтобы по чужому номеру код не узнали.
+  const norm = (x) => String(x || '').toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().replace(/\s+/g, ' ');
+  const typed = norm(req.body.name);
+  const c = phone.length >= 10 && typed && db.prepare('SELECT phone, code, name FROM clients WHERE phone = ?').get(phone);
+  const ok = c && norm(c.name) && (norm(c.name) === typed || norm(c.name).split(' ').includes(typed));
+  if (!ok) return forgotPage(req, `<div class="alert err">${esc(t('forgot_none'))}</div>${forgotForm(t, req.body.phone, req.body.name)}<a href="/">${esc(t('get_code'))}</a>`);
   const shown = /^\d+$/.test(c.code) ? `D${c.code}` : c.code;
   forgotPage(req, `<p class="muted">${esc(t('forgot_found'))}</p><div class="code">${esc(shown)}</div>
     <form method="post" action="/cabinet/login"><input type="hidden" name="phone" value="${esc(c.phone)}"><input type="hidden" name="code" value="${esc(c.code)}"><p><button>${esc(t('login_btn'))}</button></p></form>`);
