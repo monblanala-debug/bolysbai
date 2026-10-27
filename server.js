@@ -480,7 +480,7 @@ const FEES = ['freight', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_
 
 function invoiceValue(inv, k) {
   if (k === 'inv_date') return fmtDay(inv.inv_date || inv.created_at);
-  if (k === 'rate') return inv.rate ? `${num(inv.rate)}${inv.price_basis === 'kg' ? ' /кг' : ' /м³'}` : '0';
+  if (k === 'rate') return inv.rate ? `${num(inv.rate)} $/${inv.price_basis === 'kg' ? 'кг' : 'м³'}` : '0';
   if (k === 'ins_rate') return `${num(inv.ins_rate)}%`;
   return NUM_FIELDS.includes(k) ? num(inv[k]) : inv[k] || '';
 }
@@ -930,11 +930,12 @@ function importInvoiceRow(req, rec, dayDefault, bad, skipped) {
   rec.inv_date = parseDay(rec.inv_date, dayDefault);
   if (!numOrNull(rec.pieces) && cno) rec.pieces = cno[4];
   const n = (k) => numOrNull(String(rec[k] ?? '').replace(',', '.')) || 0;
-  // Цена за кг или за м³: смотрим, что сходится с итогом; без итога — крупная цена значит за м³.
+  // Цена за кг или за м³ по самой цене: за кг — до ~5 $, за м³ — от 100 $. Между ними смотрим, что сходится с итогом.
   if (!rec.price_basis) {
     const total = n('amount') || n('freight');
     const byKg = n('rate') * n('total_weight'); const byM3 = n('rate') * n('volume');
-    rec.price_basis = total && byKg && byM3 ? (Math.abs(total - byKg) < Math.abs(total - byM3) ? 'kg' : 'm3') : n('rate') >= 20 ? 'm3' : 'kg';
+    rec.price_basis = n('rate') <= 10 ? 'kg' : n('rate') >= 50 ? 'm3'
+      : total && byKg && byM3 ? (Math.abs(total - byKg) < Math.abs(total - byM3) ? 'kg' : 'm3') : 'm3';
   } else rec.price_basis = /кг|kg|公斤/i.test(rec.price_basis) ? 'kg' : 'm3';
   // Итог из таблицы — главный: фрахт = итог минус остальные платежи.
   const others = n('ins_fee') + n('pack_fee') + n('advance') + n('unload_fee') + n('other_fee');
