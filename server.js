@@ -715,16 +715,16 @@ const IMPORT_COLS = {
 
 app.get('/admin/import', (req, res) => {
   const t = req.t;
-  adminRender(req, res, t('a_import'), `<div class="card"><h2>${esc(t('a_import'))}</h2><p class="muted">${esc(t('a_import_hint'))}</p>
-    <form method="post" action="/admin/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div>
-    <div><label>${esc(t('status'))}</label><select name="default_status">${statusOptions(t, 'china')}</select></div><button>${esc(t('a_upload'))}</button></form>
-    <p><a href="/admin/template.xlsx">${esc(t('a_template'))}</a></p></div>
-    <div class="card" id="inv"><h2>${esc(t('a_inv_import'))}</h2><p class="muted">${esc(t('a_inv_import_hint'))}</p>
+  adminRender(req, res, t('a_import'), `<div class="card" id="inv"><h2>${esc(t('a_inv_import'))}</h2><p class="muted">${esc(t('a_inv_import_hint'))}</p>
     <form method="post" action="/admin/import-invoices" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div>
     <div><label>${esc(t('a_inv_default_date'))}</label><input type="date" name="inv_date" value="${new Date().toISOString().slice(0, 10)}"></div>
     <div><label>始发地 · Пункт вылета</label><select name="origin">${activeWarehouses().map((x) => `<option>${esc(`${x.name_zh}/${x.name_ru}`)}</option>`).join('')}</select></div>
     <button>${esc(t('a_upload'))}</button></form>
-    <p><a href="/admin/invoice-template.xlsx">${esc(t('a_template'))}</a></p></div>`);
+    <p><a href="/admin/invoice-template.xlsx">${esc(t('a_template'))}</a></p></div>
+    <div class="card"><h2>${esc(t('a_import'))}</h2><p class="muted">${esc(t('a_import_hint'))}</p>
+    <form method="post" action="/admin/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div>
+    <div><label>${esc(t('status'))}</label><select name="default_status">${statusOptions(t, 'china')}</select></div><button>${esc(t('a_upload'))}</button></form>
+    <p><a href="/admin/template.xlsx">${esc(t('a_template'))}</a></p></div>`);
 });
 
 app.get('/admin/template.xlsx', (req, res) => {
@@ -746,6 +746,8 @@ app.post('/admin/import', upload.single('file'), (req, res) => {
   const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false });
   const map = (rows[0] || []).map(matchColumn);
+  // Ежедневную таблицу накладных по ошибке загрузили в форму посылок — загружаем её как накладные.
+  if (!map.includes('track')) return importInvoices(req, res);
   const def = STATUSES[req.body.default_status] ? req.body.default_status : 'china';
   let n = 0;
   db.exec('BEGIN');
@@ -892,7 +894,8 @@ function importInvoiceRow(req, rec, dayDefault, bad, skipped) {
   return id ? 1 : 0;
 }
 
-app.post('/admin/import-invoices', upload.single('file'), (req, res) => {
+app.post('/admin/import-invoices', upload.single('file'), (req, res) => importInvoices(req, res));
+function importInvoices(req, res) {
   if (!req.file) return res.redirect('/admin/import');
   const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
   const dayDefault = /^\d{4}-\d{2}-\d{2}$/.test(req.body.inv_date) ? req.body.inv_date : new Date().toISOString().slice(0, 10);
@@ -923,7 +926,7 @@ app.post('/admin/import-invoices', upload.single('file'), (req, res) => {
   const unknown = [...new Set(bad)];
   req.session.flash = `${req.t('a_inv_imported')}: ${n}${unknown.length ? `. ${req.t('a_inv_new_clients')} (${unknown.length}): ${unknown.slice(0, 40).join(', ')}${unknown.length > 40 ? '…' : ''}` : ''}${skipped.length ? `. ${req.t('a_inv_skipped')}: ${skipped.slice(0, 20).join(', ')}` : ''}${heads ? '' : `. ${req.t('a_inv_nohead')}`}`;
   res.redirect('/admin/invoices');
-});
+}
 
 app.get('/admin/invoices', (req, res) => {
   const t = req.t;
