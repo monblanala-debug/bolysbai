@@ -259,7 +259,9 @@ function invStage(i) {
 }
 const invBadge = (t, i) => { const s = invStage(i); return `<span class="badge b-${s === 'sent' ? 'china' : s === 'arrived' || s === 'delivered' ? s : s === 'to_customs' ? 'transit' : 'border'}">${esc(t('ist_' + s))}</span>`; };
 // ---------- Деньги: оплата частями и долг ----------
-const PAY_METHODS = ['cash', 'kaspi', 'transfer', 'other'];
+// Принимаем наличными в Алматы и Москве, юанями; переводом — небольшие суммы по договорённости.
+const PAY_METHODS = ['cash_ala', 'cash_msk', 'cny', 'transfer', 'other'];
+const PAY_KNOWN = [...PAY_METHODS, 'auto', 'cash', 'kaspi'];
 const paidSum = (id) => db.prepare('SELECT COALESCE(SUM(amount), 0) s FROM payments WHERE invoice_id = ?').get(id).s;
 const invDebt = (i) => (i.paid ? 0 : Math.max(0, Math.round(((i.amount || 0) - paidSum(i.id)) * 100) / 100));
 // Долг по накладной i в SQL.
@@ -453,7 +455,7 @@ app.get('/cabinet', (req, res) => {
   res.render(t('nav_cabinet'), `<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
     <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
     <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>${newsBlock(req)}${promo(req)}
-    <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoicesTable(t, invoices, '/invoice/')}</div>
+    <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoices.some((i) => !i.paid) ? `<div class="alert info">💵 ${esc(t('pay_info'))}</div>` : ''}${invoicesTable(t, invoices, '/invoice/')}</div>
     ${myParcels(req, client)}
 `);
 });
@@ -569,6 +571,7 @@ function invoicePage(req, inv) {
   ${forwardCard(req, inv)}
   <div class="wb wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
       ${rules.map((l, i) => (i === 0 && !/^\d/.test(l) ? `<p><b>${esc(l)}</b></p>` : `<p>${esc(l)}</p>`)).join('')}</div>
+  ${inv.paid ? '' : `<div class="alert info noprint">💵 ${esc(t('pay_info'))}</div>`}
   <p class="muted" style="font-size:13px">${esc(t('inv_rules_agree'))} <a href="/insurance">🛡 ${esc(t('nav_insurance'))}</a></p>
   <style>@page{size:A4 landscape;margin:10mm}</style>
   <script>// Накладная всегда как бумажный лист в альбомной ориентации: на узком экране уменьшаем её целиком.
@@ -1224,9 +1227,9 @@ app.get('/admin/invoices/:id', (req, res) => {
     <p>${esc(t('total'))}: <b>${esc(money(inv.amount))}</b> · ${esc(t('a_rep_paid'))}: <b>${esc(money((inv.amount || 0) - debt))}</b> · ${esc(t('a_debt'))}: <b style="color:${debt > 0 ? 'var(--brand)' : 'var(--ok)'}">${esc(money(debt))}</b></p>
     ${pays.length ? paymentsTable(req, pays.map((p) => ({ ...p, number: '' })), false) : ''}
     ${debt > 0 ? `<form method="post" action="/admin/invoices/${inv.id}/payments" class="row" style="align-items:flex-end;margin-top:10px">
-      <div><label>${esc(t('a_pay_amount'))}</label><input name="amount" inputmode="decimal" value="${esc(String(debt))}" required></div>
-      <div><label>${esc(t('a_pay_method'))}</label><select name="method">${PAY_METHODS.map((m) => `<option value="${m}">${esc(t('pay_' + m))}</option>`).join('')}</select></div>
-      <div style="flex:2 1 200px"><label>${esc(t('note'))}</label><input name="note" maxlength="200"></div><button style="flex:0 0 auto">${esc(t('a_pay_add'))}</button></form>` : ''}</div>` : '';
+      <div><label>${esc(t('a_pay_amount'))}, $</label><input name="amount" inputmode="decimal" value="${esc(String(debt))}" required></div>
+      <div><label>${esc(t('a_pay_method'))}</label><select name="method">${PAY_METHODS.map((m) => `<option value="${m}" ${m === (isMsk(inv.destination) ? 'cash_msk' : 'cash_ala') ? 'selected' : ''}>${esc(t('pay_' + m))}</option>`).join('')}</select></div>
+      <div style="flex:2 1 200px"><label>${esc(t('note'))}</label><input name="note" maxlength="200" placeholder="${esc(t('a_pay_note_ph'))}"></div><button style="flex:0 0 auto">${esc(t('a_pay_add'))}</button></form>` : ''}</div>` : '';
   const notes = `<div class="card noprint">${cl.note ? `<div class="staff-note" style="font-size:15px;margin:0 0 10px">📝 <a href="/admin/clients/${cl.id}">${esc(dispCode(cl.code))}</a>: ${esc(cl.note)}</div>` : ''}
     <form method="post" action="/admin/invoices/${inv.id}/note"><label>✎ ${esc(t('a_inv_note'))} <span class="muted" style="font-weight:400">· ${esc(t('a_note_hidden'))}</span></label>
     <textarea name="staff_note" rows="2" placeholder="${esc(t('a_inv_note_ph'))}">${esc(inv.staff_note || '')}</textarea><p style="margin:8px 0 0"><button class="sec">${esc(t('save'))}</button></p></form></div>`;
@@ -1315,7 +1318,7 @@ function paymentsTable(req, pays, withInv) {
   const t = req.t;
   return `<table><tr><th>${esc(t('date'))}</th>${withInv ? `<th>${esc(t('invoice_no'))}</th>` : ''}<th>${esc(t('amount'))}</th><th>${esc(t('a_pay_method'))}</th><th>${esc(t('a_who'))}</th><th>${esc(t('note'))}</th>${isOwner(req) && !withInv ? '<th></th>' : ''}</tr>
   ${pays.map((p) => `<tr><td>${esc(fmtDate(utcToAlmaty(p.created_at)))}</td>${withInv ? `<td><a href="/admin/invoices/${p.invoice_id}">${esc(p.number)}</a></td>` : ''}<td><b>${esc(money(p.amount))}</b></td>
-    <td>${esc(t('pay_' + (PAY_METHODS.includes(p.method) || p.method === 'auto' ? p.method : 'other')))}</td><td>${esc(ROLES.includes(p.staff) ? t('role_' + p.staff) : p.staff)}</td><td>${esc(p.note)}</td>
+    <td>${esc(t('pay_' + (PAY_KNOWN.includes(p.method) ? p.method : 'other')))}</td><td>${esc(ROLES.includes(p.staff) ? t('role_' + p.staff) : p.staff)}</td><td>${esc(p.note)}</td>
     ${isOwner(req) && !withInv ? `<td><form method="post" action="/admin/invoices/${p.invoice_id}/payments/${p.id}/delete" onsubmit="return confirm('${esc(t('confirm_delete'))}')"><button class="sec sm">✕</button></form></td>` : ''}</tr>`).join('')}</table>`;
 }
 // Время в базе — UTC; людям показываем по Алматы.
@@ -1323,7 +1326,7 @@ const utcToAlmaty = (s) => { const d = new Date(String(s || '').replace(' ', 'T'
 app.post('/admin/invoices/:id/payments', (req, res) => {
   const id = parseInt(req.params.id, 10);
   const amount = parseFloat(String(req.body.amount || '').replace(',', '.').replace(/\s/g, ''));
-  const method = PAY_METHODS.includes(req.body.method) ? req.body.method : 'other';
+  const method = PAY_KNOWN.includes(req.body.method) && req.body.method !== 'auto' ? req.body.method : 'other';
   addPayment(req, id, amount, method, String(req.body.note || '').trim().slice(0, 200));
   res.redirect(`/admin/invoices/${id}`);
 });
