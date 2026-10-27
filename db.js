@@ -624,11 +624,9 @@ seed();
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
     if (row && row.value.includes(old)) db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(NEW_TEXT[key], key);
   }
-  // Ульяна — первый сотрудник в «Команде», дальше команду ведут в настройках.
-  if (!db.prepare("SELECT 1 FROM settings WHERE key = 'team_seeded'").get()) {
-    if (!db.prepare('SELECT 1 FROM team').get()) db.prepare("INSERT INTO team (name, role_ru, role_zh, sort) VALUES ('Ульяна', 'Менеджер, говорит по-русски', '客服经理，会说俄语', 1)").run();
-    db.prepare("INSERT INTO settings (key, value) VALUES ('team_seeded', '1')").run();
-  }
+  // Команду заполняет владелец сам; убираем стартовую Ульяну, если её не меняли.
+  db.prepare("DELETE FROM team WHERE name = 'Ульяна' AND photo = '' AND role_ru = 'Менеджер, говорит по-русски' AND role_zh = '客服经理，会说俄语'").run();
+  db.prepare("DELETE FROM settings WHERE key = 'team_seeded'").run();
   // Страница «Страховка» — по пунктам 4–7 правил накладной; меняется в настройках.
   def.run('insurance_ru', `# Страхование груза
 Страховка защищает от полной утери груза в пути. Оформляется до отправки: сообщите менеджеру стоимость товара.
