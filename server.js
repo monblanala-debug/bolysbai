@@ -717,9 +717,8 @@ app.get('/admin', (req, res) => {
   // Шапка: главные цифры дня.
   const hero = `<div class="dhero"><div class="dhero-main">${m
     ? `<div class="lb">💵 ${esc(t('a_d_got_today'))} · ${esc(fmtDay(today))}</div><div class="huge">${esc(money(td.got))}</div><div class="mo">${esc(t('a_this_month'))}: <b>${esc(money(mo.got))}</b> ${chip(cur.got, prev.got)}</div>`
-    : `<div class="lb">🚚 ${esc(t('a_d_sent_today'))} · ${esc(fmtDay(today))}</div><div class="huge">${td.sent.n}</div><div class="mo">${esc(tons(td.sent.w))} · ${esc(m3(td.sent.v))}</div>`}</div>
-    <div class="dhero-nums">${m ? `<a href="/admin/invoices"><small>🚚 ${esc(t('a_d_sent_today'))}</small><b>${td.sent.n}</b><small>${esc(tons(td.sent.w))}</small></a>`
-      : `<a href="/admin/invoices?st=arrived"><small>🏁 ${esc(t('a_d_arrived_today'))}</small><b>${td.arrived}</b><small>${esc(t('a_h_delivered'))}: ${td.delivered}</small></a>`}
+    : `<div class="lb">🏁 ${esc(t('a_d_arrived_today'))} · ${esc(fmtDay(today))}</div><div class="huge">${td.arrived}</div><div class="mo">${esc(t('a_h_delivered'))}: <b>${td.delivered}</b></div>`}</div>
+    <div class="dhero-nums${m ? '' : ' two'}">${m ? `<a href="/admin/invoices"><small>🚚 ${esc(t('a_d_sent_today'))}</small><b>${td.sent.n}</b><small>${esc(tons(td.sent.w))}</small></a>` : ''}
     <a href="/admin/invoices?st=arrived"><small>🏬 ${esc(t('a_d_in_wh'))}</small><b class="${alarm.length ? 'bad' : ''}">${lying.length}</b><small>${alarm.length ? `🔔 ${alarm.length} · ${LYING_ALARM}+ ${esc(t('a_days'))}` : esc(t('a_d_all_ok'))}</small></a>
     ${m ? `<a href="/admin/debts"><small>💳 ${esc(t('a_d_wait_pay'))}</small><b>${esc(money(debtAll))}</b><small>${unpaid} ${esc(t('a_d_invs'))}</small></a>`
       : `<a href="/admin/parcels?nc=1"><small>📦 ${esc(t('a_nc_title'))}</small><b>${nc}</b><small>${esc(t('a_total_parcels'))}: ${c('SELECT COUNT(*) c FROM parcels')}</small></a>`}</div></div>
@@ -754,7 +753,8 @@ app.get('/admin', (req, res) => {
     ${stTot ? `<div class="dseg">${st.filter(([, n]) => n).map(([s, n]) => `<i class="s-${s}" style="flex:${n}" title="${esc(t('st_' + s))}: ${n}"></i>`).join('')}</div>` : ''}
     <div class="dleg">${st.map(([s, n]) => `<a href="/admin/parcels?status=${s}"><i class="s-${s}"></i>${esc(t('st_' + s))}<b>${n}</b></a>`).join('')}</div>
     <div class="dfoot"><span>👤 ${esc(t('a_total_clients'))} <b>${c('SELECT COUNT(*) c FROM clients')}</b></span><span>🆕 ${esc(t('a_this_month'))} <b>${mo.fresh}</b> ${chip(cur.fresh, prev.fresh)}</span></div></div>`;
-  adminRender(req, res, t('a_dashboard'), `${hero}<div class="dgrid"><div>${chart}${score}</div><div>${attention}${parcels}</div></div>`);
+  // Бухгалтеру — только рабочее: склад, внимание, посылки. Тонны, график и сравнение видит владелец.
+  adminRender(req, res, t('a_dashboard'), `${hero}<div class="dgrid${m ? '' : ' half'}">${m ? `<div>${chart}${score}</div>` : ''}<div>${attention}</div>${m ? '' : '<div>'}${parcels}</div></div>`);
 });
 
 app.get('/admin/clients', (req, res) => {
