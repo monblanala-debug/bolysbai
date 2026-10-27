@@ -115,6 +115,16 @@ CREATE TABLE IF NOT EXISTS payments (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS payments_inv ON payments(invoice_id);
+-- Расходы по накладной: например, сами довезли бесплатно ($31) — с примечанием и датой.
+CREATE TABLE IF NOT EXISTS expenses (
+  id INTEGER PRIMARY KEY,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+  amount REAL NOT NULL,
+  note TEXT DEFAULT '',
+  spent_on TEXT,
+  staff TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
 -- Журнал: кто и что сделал в админке.
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY,
@@ -163,6 +173,11 @@ for (const [table, col, def] of [
   ['invoices', 'staff_note_at', 'TEXT'],
   // «В долг»: отдали груз без оплаты — это и есть долг (просто неоплаченное долгом не считаем).
   ['invoices', 'credit', 'INTEGER DEFAULT 0'],
+  // Оплата: в какой день реально приняли (бухгалтер вносит позже по чату), валюта и курс, если в юанях.
+  ['payments', 'paid_on', 'TEXT'],
+  ['payments', 'currency', "TEXT DEFAULT 'USD'"],
+  ['payments', 'amount_orig', 'REAL'],
+  ['payments', 'rate', 'REAL'],
   ['invoices', 'credit_at', 'TEXT'],
   ['invoices', 'credit_by', "TEXT DEFAULT ''"],
   ['invoices', 'arrived_at', 'TEXT'],
@@ -295,6 +310,7 @@ seed();
 // Настройки, появившиеся позже: в старых базах дописываем, не трогая уже заполненные.
 {
   const def = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+  def.run('cny_rate', '7.2');
   def.run('wa_arrival_ru', 'Здравствуйте, {name}! Ваша посылка {mark} прибыла на склад {warehouse}. Мест: {places}{weight}. Фото: {link}');
   def.run('wa_arrival_zh', '您好，{name}！您的包裹 {mark} 已到达{warehouse}仓库。件数：{places}{weight}。照片：{link}');
   def.run('promo_title_ru', 'Не получается оплатить поставщику?');
