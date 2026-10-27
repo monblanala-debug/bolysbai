@@ -391,15 +391,17 @@ function invoicesTable(t, invoices, base, withPaid = true, canDelete = false) {
   <td style="min-width:170px"><div style="margin-bottom:4px">${invBadge(t, i)}</div>
     <form method="post" action="/admin/invoices/${i.id}/status" style="margin-bottom:4px"><input type="hidden" name="back" class="back"><select name="inv_status" onchange="this.form.submit()" class="rowsel" title="${esc(t('a_set_status'))}">${invStatusOptions(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'auto')}</select></form>
     ${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${payBadge(t, i)}${creditBadge(t, i)}</td>
-  <td><div style="display:grid;gap:6px"><a class="btn sec sm" href="${base}${i.id}">${esc(t('a_open'))}</a>${photoForm(t, i.id, '/admin/invoices')}${i.pc ? `<span class="muted">📷 ${i.pc}</span>` : ''}</div></td>
+  <td><div style="display:grid;gap:6px"><a class="btn sec sm" href="${base}${i.id}">${esc(t('a_open'))}</a>${withPaid ? `<button type="button" class="sm paybtn" data-id="${i.id}">💵 ${esc(t('a_payments'))}</button>` : ''}${photoForm(t, i.id, '/admin/invoices')}${i.pc ? `<span class="muted">📷 ${i.pc}</span>` : ''}</div></td>
   <td><form method="post" action="/admin/invoices/${i.id}/note" class="rownote"><input type="hidden" name="back" class="back"><textarea name="staff_note" rows="2" placeholder="${esc(t('a_inv_note_short'))}">${esc(i.staff_note || '')}</textarea>
-    <div class="row" style="align-items:center;gap:6px;margin-top:4px"><button class="sec sm" style="flex:0 0 auto">${esc(t('save'))}</button>${i.staff_note ? `<span class="muted" style="font-size:12px">${esc(noteBy(t, i))}</span>` : ''}</div></form></td></tr>`; }).join('')}</table></div>
+    <div class="row" style="align-items:center;gap:6px;margin-top:4px"><button class="sec sm" style="flex:0 0 auto">${esc(t('save'))}</button>${i.staff_note ? `<span class="muted" style="font-size:12px">${esc(noteBy(t, i))}</span>` : ''}</div></form></td></tr>
+  ${withPaid ? payRow(t, i) : ''}`; }).join('')}</table></div>
   <form method="post" action="/admin/invoices/bulk" id="bulkinv" class="row" style="margin-top:12px"><input type="hidden" name="back" id="inv-back"><div><label>${esc(t('a_bulk_inv'))}</label><select name="inv_status"><option value="">— ${esc(t('a_no_change'))} —</option>${invStatusOptions(t, '')}</select></div>
     ${withPaid ? `<div><label>${esc(t('paid'))}</label><select name="paid"><option value="">—</option><option value="1">${esc(t('paid'))}</option><option value="0">${esc(t('unpaid'))}</option></select></div>` : ''}
     <button>${esc(t('apply'))}</button>${canDelete ? `<button class="sec" name="del" value="1" onclick="return confirm('${esc(t('a_bulk_del_confirm'))}')">${esc(t('a_bulk_del'))}</button>` : ''}</form>
   <script>document.getElementById('inv-all').addEventListener('change',(e)=>document.querySelectorAll('input[form=bulkinv][name=ids],.day-all').forEach((c)=>c.checked=e.target.checked));
 document.querySelectorAll('.day-all').forEach((d)=>d.addEventListener('change',()=>document.querySelectorAll('input[form=bulkinv][name=ids][data-day="'+d.dataset.day+'"]').forEach((c)=>c.checked=d.checked)));
-document.getElementById('inv-back').value=location.pathname+location.search;document.querySelectorAll('input.back').forEach((b)=>b.value=location.pathname+location.search)</script>${PHOTO_JS}`;
+document.getElementById('inv-back').value=location.pathname+location.search;document.querySelectorAll('input.back').forEach((b)=>b.value=location.pathname+location.search);
+document.querySelectorAll('.paybtn').forEach((b)=>b.addEventListener('click',()=>{const r=document.getElementById('pay-'+b.dataset.id);r.hidden=!r.hidden;if(!r.hidden)r.querySelector('input[name=amount]').focus()}))</script>${PHOTO_JS}${withPaid ? PAYFORM_JS : ''}`;
 }
 
 // Мои трек-номера: клиент добавляет треки заранее; когда склад отсканирует коробку, тут появятся фото и «Принят на складе».
@@ -1227,6 +1229,41 @@ app.post('/admin/invoices', (req, res) => {
   res.redirect(id ? `/admin/invoices/${id}` : '/admin/invoices');
 });
 
+// Форма оплаты: в накладной и прямо в строке списка (там back — вернуться в список с тем же фильтром).
+function payForm(t, inv, debt, inRow = false) {
+  const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
+  const note = `<div style="flex:2 1 200px"><label>${esc(t('note'))}</label><input name="note" maxlength="200" placeholder="${esc(t('a_pay_note_ph'))}"></div>`;
+  return `<form method="post" action="/admin/invoices/${inv.id}/payments" class="payform" style="margin-top:${inRow ? 0 : 12}px">${inRow ? '<input type="hidden" name="back" class="back">' : ''}
+      <div class="row" style="align-items:flex-end">
+      <div style="flex:1 1 110px"><label>${esc(t('a_pay_amount'))}</label><input name="amount" inputmode="decimal" value="${debt > 0 ? esc(String(debt)) : ''}" data-usd="${debt}" placeholder="0"></div>
+      <div style="flex:0 1 100px"><label>${esc(t('a_currency'))}</label><select name="currency"><option value="USD">$</option><option value="CNY">¥ ${esc(t('pay_cny'))}</option></select></div>
+      <div class="rate" style="flex:0 1 100px;display:none"><label>${esc(t('a_rate'))} ¥/$</label><input name="rate" inputmode="decimal" value="${esc(setting('cny_rate') || '7.2')}"></div>
+      <div style="flex:1 1 150px"><label>${esc(t('a_pay_where'))}</label><select name="method">${PAY_METHODS.map((m) => `<option value="${m}" ${m === (isMsk(inv.destination) ? 'cash_msk' : 'cash_ala') ? 'selected' : ''}>${esc(t('pay_' + m))}</option>`).join('')}</select></div>
+      <div style="flex:0 1 160px"><label>${esc(t('a_pay_day'))}</label><input type="date" name="paid_on" value="${today}"></div>${inRow ? note : ''}</div>
+      <div class="row" style="align-items:flex-end;margin-top:8px">${inRow ? '' : note}
+      ${invStage(inv) !== 'delivered' ? `<label style="flex:0 0 auto;display:flex;gap:6px;align-items:center;font-weight:600;padding-bottom:10px"><input type="checkbox" name="delivered" value="1" style="width:auto"> ${esc(t('a_mark_delivered'))}</label>` : `<span class="muted" style="flex:0 0 auto;padding-bottom:10px">✓ ${esc(t('ist_delivered'))}${inv.delivered_at ? ` · ${esc(fmtDay(utcToAlmaty(inv.delivered_at).slice(0, 10)))}` : ''}</span>`}
+      <button style="flex:0 0 auto">${esc(t('a_pay_save'))}</button></div></form>`;
+}
+// Юани: показать поле курса и пересчитать подставленный остаток в ¥.
+const PAYFORM_JS = `<script>document.querySelectorAll('.payform').forEach((f)=>{const c=f.currency,r=f.rate,a=f.amount,box=f.querySelector('.rate');const usd=parseFloat(a.dataset.usd)||0;
+  const upd=()=>{const y=c.value==='CNY';box.style.display=y?'':'none';if(usd>0)a.value=y?Math.round(usd*(parseFloat(String(r.value).replace(',','.'))||7.2)):usd};c.addEventListener('change',upd);r.addEventListener('input',upd)})</script>`;
+// Скрытая строка под накладной в списке: оплата и расход, не заходя в накладную.
+function payRow(t, i) {
+  const debt = invDebt(i);
+  const pays = db.prepare('SELECT * FROM payments WHERE invoice_id = ? ORDER BY id').all(i.id);
+  const exps = db.prepare('SELECT * FROM expenses WHERE invoice_id = ? ORDER BY id').all(i.id);
+  const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
+  const hist = [...pays.map((p) => `💵 ${fmtDay(p.paid_on || utcToAlmaty(p.created_at).slice(0, 10))} · ${money(p.amount)}${p.currency === 'CNY' ? ` (${num(p.amount_orig)} ¥)` : ''} · ${t('pay_' + (PAY_KNOWN.includes(p.method) ? p.method : 'other'))}${p.note ? ` · ${p.note}` : ''}`),
+    ...exps.map((e) => `➖ ${fmtDay(e.spent_on)} · ${t('a_expenses')} ${money(e.amount)}${e.note ? ` · ${e.note}` : ''}`)];
+  return `<tr id="pay-${i.id}" class="payrow" hidden><td></td><td colspan="6"><div class="paybox">
+    <div style="margin-bottom:8px"><b>${esc(i.number)}</b> · ${esc(t('total'))} <b>${esc(money(i.amount))}</b> · ${esc(t('a_debt'))} <b style="color:${debt > 0 ? 'var(--brand)' : 'var(--ok)'}">${esc(money(debt))}</b>
+      ${hist.length ? `<div class="muted" style="font-size:13px;margin-top:4px">${hist.map(esc).join('<br>')}</div>` : ''}</div>
+    ${payForm(t, i, debt, true)}
+    <form method="post" action="/admin/invoices/${i.id}/expenses" class="row" style="align-items:flex-end;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)"><input type="hidden" name="back" class="back">
+      <div style="flex:0 1 110px"><label>${esc(t('a_expenses'))}, $</label><input name="amount" inputmode="decimal" required></div>
+      <div style="flex:2 1 220px"><label>${esc(t('note'))}</label><input name="note" maxlength="200" placeholder="${esc(t('a_expense_ph'))}"></div>
+      <div style="flex:0 1 160px"><label>${esc(t('date'))}</label><input type="date" name="spent_on" value="${today}"></div><button class="sec" style="flex:0 0 auto">${esc(t('a_expense_add'))}</button></form></div></td></tr>`;
+}
 app.get('/admin/invoices/:id', (req, res) => {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.id, 10));
   if (!inv) return res.redirect('/admin/invoices');
@@ -1240,18 +1277,8 @@ app.get('/admin/invoices/:id', (req, res) => {
     ${pays.length ? paymentsTable(req, pays.map((p) => ({ ...p, number: '' })), false) : ''}
     ${debt > 0 ? `<form method="post" action="/admin/invoices/${inv.id}/credit" class="row" style="align-items:center;margin-top:10px"><input type="hidden" name="credit" value="${inv.credit ? 0 : 1}">
       <button class="sec" style="flex:0 0 auto">🤝 ${esc(t(inv.credit ? 'a_credit_off' : 'a_credit_on'))}</button><span class="muted" style="font-size:13px">${inv.credit ? `${esc(t('a_credit'))}: ${esc(ROLES.includes(inv.credit_by) ? t('role_' + inv.credit_by) : inv.credit_by)} · ${esc(fmtDate(utcToAlmaty(inv.credit_at)))}` : esc(t('a_credit_hint'))}</span></form>` : ''}
-    <form method="post" action="/admin/invoices/${inv.id}/payments" class="payform" style="margin-top:12px">
-      <div class="row" style="align-items:flex-end">
-      <div><label>${esc(t('a_pay_amount'))}</label><input name="amount" inputmode="decimal" value="${debt > 0 ? esc(String(debt)) : ''}" data-usd="${debt}" ${debt > 0 ? '' : 'placeholder="0"'}></div>
-      <div style="flex:0 1 110px"><label>${esc(t('a_currency'))}</label><select name="currency"><option value="USD">$</option><option value="CNY">¥ ${esc(t('pay_cny'))}</option></select></div>
-      <div class="rate" style="flex:0 1 120px;display:none"><label>${esc(t('a_rate'))} ¥/$</label><input name="rate" inputmode="decimal" value="${esc(setting('cny_rate') || '7.2')}"></div>
-      <div><label>${esc(t('a_pay_where'))}</label><select name="method">${PAY_METHODS.map((m) => `<option value="${m}" ${m === (isMsk(inv.destination) ? 'cash_msk' : 'cash_ala') ? 'selected' : ''}>${esc(t('pay_' + m))}</option>`).join('')}</select></div>
-      <div style="flex:0 1 170px"><label>${esc(t('a_pay_day'))}</label><input type="date" name="paid_on" value="${new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10)}"></div></div>
-      <div class="row" style="align-items:flex-end;margin-top:8px"><div style="flex:2 1 220px"><label>${esc(t('note'))}</label><input name="note" maxlength="200" placeholder="${esc(t('a_pay_note_ph'))}"></div>
-      ${invStage(inv) !== 'delivered' ? `<label style="flex:0 0 auto;display:flex;gap:6px;align-items:center;font-weight:600;padding-bottom:10px"><input type="checkbox" name="delivered" value="1" style="width:auto"> ${esc(t('a_mark_delivered'))}</label>` : `<span class="muted" style="flex:0 0 auto;padding-bottom:10px">✓ ${esc(t('ist_delivered'))}${inv.delivered_at ? ` · ${esc(fmtDay(utcToAlmaty(inv.delivered_at).slice(0, 10)))}` : ''}</span>`}
-      <button style="flex:0 0 auto">${esc(t('a_pay_save'))}</button></div></form>
-    <script>(function(){const f=document.querySelector('.payform');const c=f.currency,r=f.rate,a=f.amount,box=f.querySelector('.rate');const usd=parseFloat(a.dataset.usd)||0;
-      const upd=()=>{const y=c.value==='CNY';box.style.display=y?'':'none';if(usd>0)a.value=y?Math.round(usd*(parseFloat(String(r.value).replace(',','.'))||7.2)):usd};c.addEventListener('change',upd);r.addEventListener('input',upd)})()</script>
+    ${payForm(t, inv, debt)}
+    ${PAYFORM_JS}
     <details style="margin-top:12px" open><summary><b>${esc(t('a_expenses'))}</b>${exps.length ? ` · ${esc(money(exps.reduce((x, e) => x + e.amount, 0)))}` : ''} <span class="muted" style="font-weight:400">· ${esc(t('a_expenses_hint'))}</span></summary>
       ${exps.length ? `<table style="margin-top:8px"><tr><th>${esc(t('date'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('note'))}</th><th>${esc(t('a_who'))}</th>${isOwner(req) ? '<th></th>' : ''}</tr>${exps.map((e) => `<tr><td>${esc(fmtDay(e.spent_on))}</td><td><b>${esc(money(e.amount))}</b></td><td>${esc(e.note)}</td><td>${esc(ROLES.includes(e.staff) ? t('role_' + e.staff) : e.staff)}</td>
         ${isOwner(req) ? `<td><form method="post" action="/admin/invoices/${inv.id}/expenses/${e.id}/delete" onsubmit="return confirm('${esc(t('confirm_delete'))}')"><button class="sec sm">✕</button></form></td>` : ''}</tr>`).join('')}</table>` : ''}
@@ -1363,13 +1390,13 @@ app.post('/admin/invoices/:id/payments', (req, res) => {
   const cny = b.currency === 'CNY'; const rate = numIn(b.rate) || numIn(setting('cny_rate')) || 7.2;
   if (orig > 0) addPayment(req, id, cny ? orig / rate : orig, method, String(b.note || '').trim().slice(0, 200), { paid_on: day, currency: cny ? 'CNY' : 'USD', amount_orig: orig, rate: cny ? rate : null });
   if (b.delivered === '1') db.prepare("UPDATE invoices SET inv_status = 'delivered' WHERE id = ?").run(id), db.prepare("UPDATE invoices SET delivered_at = ? WHERE id = ?").run(`${day} 07:00:00`, id);
-  res.redirect(`/admin/invoices/${id}`);
+  res.redirect(rowBack(req, id));
 });
 app.post('/admin/invoices/:id/expenses', (req, res) => {
   const id = parseInt(req.params.id, 10); const amount = numIn(req.body.amount);
   if (amount > 0 && db.prepare('SELECT 1 FROM invoices WHERE id = ?').get(id)) db.prepare('INSERT INTO expenses (invoice_id, amount, note, spent_on, staff) VALUES (?, ?, ?, ?, ?)')
     .run(id, Math.round(amount * 100) / 100, String(req.body.note || '').trim().slice(0, 200), dayIn(req.body.spent_on), staffWho(req) || req.session.admin);
-  res.redirect(`/admin/invoices/${id}`);
+  res.redirect(rowBack(req, id));
 });
 app.post('/admin/invoices/:id/expenses/:eid/delete', (req, res) => {
   const id = parseInt(req.params.id, 10);
