@@ -270,21 +270,29 @@ app.get('/track', (req, res) => {
   const t = req.t;
   const tracks = String(req.query.q || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean).slice(0, 50);
   let results = '';
-  if (tracks.length) {
-    results = `<div class="fade"><div class="alert info">${esc(t('track_eta'))}</div>${tracks.map((no) => {
-      const i = findInvoice(no);
-      if (!i) return `<div class="card"><b>${esc(no)}</b><p class="muted" style="margin:4px 0 0">${esc(t('track_none'))}</p></div>`;
-      return `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(i.number)}</b><div style="flex:0 0 auto">${invBadge(t, i)}</div></div>
+  const card = (i) => `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(i.number)}</b><div style="flex:0 0 auto">${invBadge(t, i)}</div></div>
         ${invTimeline(t, i)}
         <div class="muted">${esc(t('inv_sent'))}: ${esc(fmtDay(i.inv_date || i.created_at))}${i.origin || i.destination ? ` · ${esc(i.origin)} → ${esc(i.destination)}` : ''}</div>
         <div class="muted">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}</div>
         <p style="margin:10px 0 0"><a class="btn sec sm" href="/invoice/${i.id}">${esc(t('inv_view'))}</a></p></div>`;
+  const client = req.session.clientId && getClient(req.session.clientId);
+  if (tracks.length) {
+    results = `<div class="fade"><div class="alert info">${esc(t('track_eta'))}</div>${tracks.map((no) => {
+      const i = findInvoice(no);
+      return i ? card(i) : `<div class="card"><b>${esc(no)}</b><p class="muted" style="margin:4px 0 0">${esc(t('track_none'))}</p></div>`;
     }).join('')}</div>`;
+  } else if (client) {
+    // Клиент вошёл — сразу показываем его грузы: сначала те, что ещё в пути, потом последние выданные.
+    const all = db.prepare('SELECT * FROM invoices WHERE client_id = ? ORDER BY id DESC LIMIT 100').all(client.id);
+    const live = all.filter((i) => invStage(i) !== 'delivered');
+    const list = live.length ? live : all.slice(0, 5);
+    results = `<div class="fade"><h2>${esc(t('track_mine'))} · ${esc(dispCode(client.code))}</h2><div class="alert info">${esc(t('track_eta'))}</div>
+      ${list.length ? list.map(card).join('') : `<div class="card"><p class="muted" style="margin:0">${esc(t('track_mine_none'))}</p></div>`}</div>`;
   }
-  res.render(t('track_title'), `<div class="card"><h1>${esc(t('track_title'))}</h1>
+  res.render(t('track_title'), `${client && !tracks.length ? results : ''}<div class="card"><h1>${esc(t('track_title'))}</h1>
     <form method="get"><textarea name="q" placeholder="${esc(t('track_placeholder'))}">${esc(tracks.join('\n'))}</textarea>
     <p><button>${esc(t('track_btn'))}</button></p></form>
-    </div>${results}${promo(req)}`);
+    </div>${client && !tracks.length ? '' : results}${promo(req)}`);
 });
 
 // ---------- Фото груза на весах к накладной ----------
