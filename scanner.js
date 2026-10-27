@@ -104,6 +104,9 @@ function readScanFile(buf) {
 
 // «KY4001168305249-2-10-|x» → трек KY4001168305249, коробка 2 из 10.
 function parseScan(content) {
+  // QR-код СДЭК/SF вида MMM={'k1':…,'k5':'SF1220853721897',…}: трек лежит в k5.
+  const k5 = /['"]?k5['"]?\s*:\s*['"]?([A-Za-z0-9]{6,})/i.exec(String(content || ''));
+  if (k5) return { track: k5[1].toUpperCase(), box: null, total: null };
   const s = String(content || '').trim().replace(/['’]/g, '');
   const parts = s.split('-').map((x) => x.trim());
   const track = (parts[0] || '').replace(/\s+/g, '').toUpperCase();
