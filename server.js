@@ -1207,10 +1207,10 @@ app.post('/admin/import-scan', scanUpload.single('file'), (req, res) => {
     const x = tracks.get(s.track) || { total: null, boxes: new Set(), time: r.time, images: [] };
     if (s.total) x.total = Math.max(x.total || 0, s.total);
     if (s.box) x.boxes.add(s.box);
-    x.images.push(...r.images);
+    x.images.push(...r.images.map((img) => ({ ...img, box: s.box || 0 })));
     tracks.set(s.track, x);
   }
-  let matched = 0; let waiting = 0; let photos = 0;
+  let matched = 0; let waiting = 0; let photos = 0; let repeat = 0;
   for (const [track, x] of tracks) {
     let p = db.prepare('SELECT * FROM parcels WHERE upper(replace(track, \' \', \'\')) = ?').get(track);
     const places = x.total || x.boxes.size || 1;
@@ -1219,6 +1219,7 @@ app.post('/admin/import-scan', scanUpload.single('file'), (req, res) => {
       addEvent(id, 'china');
       p = db.prepare('SELECT * FROM parcels WHERE id = ?').get(id);
     } else {
+      if (p.scanned_at || p.status !== 'expected') repeat++;
       if (p.status === 'expected') { db.prepare("UPDATE parcels SET status = 'china' WHERE id = ?").run(p.id); addEvent(p.id, 'china'); }
       db.prepare("UPDATE parcels SET places = ?, updated_at = datetime('now') WHERE id = ?").run(Math.max(places, p.places || 0), p.id);
     }
@@ -1226,15 +1227,16 @@ app.post('/admin/import-scan', scanUpload.single('file'), (req, res) => {
     if (when) db.prepare('UPDATE parcels SET scanned_at = COALESCE(scanned_at, ?) WHERE id = ?').run(when, p.id);
     for (const img of x.images) {
       const hash = crypto.createHash('sha1').update(img.data).digest('hex');
-      if (db.prepare('SELECT 1 FROM parcel_photos WHERE parcel_id = ? AND hash = ?').get(p.id, hash)) continue;
+      // Повторный скан (тот же файл или та же коробка в другой день) фото не добавляет: одна коробка — одно фото.
+      if (db.prepare('SELECT 1 FROM parcel_photos WHERE parcel_id = ? AND (hash = ? OR box = ?)').get(p.id, hash, img.box)) continue;
       const name = `${crypto.randomUUID()}.${img.ext}`;
       fs.writeFileSync(require('path').join(PHOTO_DIR, name), img.data);
-      db.prepare('INSERT INTO parcel_photos (parcel_id, file, hash) VALUES (?, ?, ?)').run(p.id, name, hash);
+      db.prepare('INSERT INTO parcel_photos (parcel_id, file, hash, box) VALUES (?, ?, ?, ?)').run(p.id, name, hash, img.box);
       photos++;
     }
     if (p.client_id) matched++; else waiting++;
   }
-  req.session.flash = `${req.t('a_scan_done')}: ${tracks.size}. ${req.t('a_scan_matched')}: ${matched}. ${req.t('a_scan_waiting')}: ${waiting}. ${req.t('a_scan_photos')}: ${photos}.`;
+  req.session.flash = `${req.t('a_scan_done')}: ${tracks.size}. ${req.t('a_scan_matched')}: ${matched}. ${req.t('a_scan_waiting')}: ${waiting}. ${req.t('a_scan_photos')}: ${photos}. ${req.t('a_scan_repeat')}: ${repeat}.`;
   res.redirect(back);
 });
 

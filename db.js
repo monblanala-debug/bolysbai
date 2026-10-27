@@ -129,6 +129,8 @@ for (const [table, col, def] of [
   ['parcels', 'warehouse_id', 'INTEGER'],
   // Фото из файла сканера: хэш, чтобы повторная загрузка не дублировала; время скана на складе.
   ['parcel_photos', 'hash', 'TEXT'],
+  // Номер коробки (2 из 10): на одну коробку храним одно фото, повторный скан её не дублирует.
+  ['parcel_photos', 'box', 'INTEGER'],
   ['parcels', 'scanned_at', 'TEXT'],
   ['invoices', 'pieces', 'INTEGER DEFAULT 0'],
   ...['volume', 'freight', 'goods_value', 'ins_rate', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee']
