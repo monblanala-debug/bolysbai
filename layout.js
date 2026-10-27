@@ -161,6 +161,7 @@ body{padding-bottom:72px}
 @keyframes rd-fly{from{transform:translate(-60px,30px)}to{transform:translate(110vw,-10px)}}
 @media (prefers-reduced-motion:reduce){.road:after,.road .tr,.bgtr span,.dk-hero:before,.iv-hero:before{animation:none}.bgtr{display:none}}
 @media print{.road,.bgtr{display:none}}
+.f-cities{margin-top:6px;font-size:13px;opacity:.8}
 @media print{header,footer,.wa-fab,.noprint{display:none!important}.wb-sheet{width:auto!important;transform:none!important;font-size:12px}.wb-fit{height:auto!important}.wb .goods .l{font-size:10px}.wb .v{font-size:13px}.card{border:0}body{background:#fff}}
 `;
 
@@ -182,11 +183,21 @@ hero.querySelectorAll('.hl').forEach(x=>x.classList.remove('hl'));hero.classList
 hero.querySelectorAll('[data-to="'+g.dataset.key+'"]').forEach(x=>x.classList.add('hl'))});
 `;
 
+// Заголовок, описание, канонический адрес, языковые версии и превью ссылки для поиска и мессенджеров.
+function head(seo, title, t, lang, path) {
+  const o = seo.origin || ''; const full = seo.title || `${title} · ${t('brand')}`; const url = `${o}${path}${lang === 'ru' ? '' : `?lang=${lang}`}`;
+  return `<title>${esc(full)}</title>${seo.desc ? `<meta name="description" content="${esc(seo.desc)}">` : ''}
+${seo.noindex ? '<meta name="robots" content="noindex, nofollow">' : `<link rel="canonical" href="${esc(url)}">`}
+${seo.alt ? ['ru', 'kk', 'zh'].map((l) => `<link rel="alternate" hreflang="${l}" href="${esc(`${o}${path}${l === 'ru' ? '' : `?lang=${l}`}`)}">`).join('') + `<link rel="alternate" hreflang="x-default" href="${esc(o + path)}">` : ''}
+<meta property="og:type" content="website"><meta property="og:site_name" content="${esc(t('brand'))}"><meta property="og:title" content="${esc(full)}">${seo.desc ? `<meta property="og:description" content="${esc(seo.desc)}">` : ''}
+<meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(o)}/og.jpg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image">
+${(seo.verify || []).map(([n, v]) => `<meta name="${n}" content="${esc(v)}">`).join('')}<meta name="theme-color" content="#17181c"><link rel="icon" href="/logo.png">${seo.jsonld ? `<script type="application/ld+json">${seo.jsonld}</script>` : ''}`;
+}
 // Публичные страницы: фура «151» едет по дороге под меню, на фоне бледные фуры в разные стороны.
 const TRUCK = '<svg viewBox="0 0 120 50" width="96" height="40" aria-hidden="true"><rect x="2" y="6" width="72" height="30" rx="3" fill="#e5262d"/><text x="38" y="27" font-size="13" font-weight="800" fill="#fff" text-anchor="middle" font-family="system-ui">151</text><path d="M76 14h22l14 12v10H76z" fill="#17181c"/><path d="M82 18h14l8 8H82z" fill="#9fc6e8"/><circle cx="20" cy="40" r="7" fill="#17181c"/><circle cx="20" cy="40" r="3" fill="#ccc"/><circle cx="58" cy="40" r="7" fill="#17181c"/><circle cx="58" cy="40" r="3" fill="#ccc"/><circle cx="98" cy="40" r="7" fill="#17181c"/><circle cx="98" cy="40" r="3" fill="#ccc"/></svg>';
 const ROAD = `<div class="road noprint" aria-hidden="true"><div class="tr">${TRUCK}</div></div>`;
 const BG_TRUCKS = `<div class="bgtr" aria-hidden="true">${['a', 'b', 'c', 'd', 'e'].map((c) => `<span class="${c}">${TRUCK}</span>`).join('')}</div>`;
-function page({ title, body, t, lang, path, session, whatsapp }) {
+function page({ title, body, t, lang, path, session, whatsapp, seo = {} }) {
   const wa = String(whatsapp || '').replace(/\D/g, '');
   const adm = String(path || '').startsWith('/admin'); // в админке подвал и кнопка WhatsApp не нужны
   const waPretty = wa.length === 13 ? `+${wa.slice(0, 2)} ${wa.slice(2, 5)} ${wa.slice(5, 9)} ${wa.slice(9)}` : `+${wa}`;
@@ -198,10 +209,10 @@ function page({ title, body, t, lang, path, session, whatsapp }) {
   const logout = session && (session.clientId || session.admin) ? `<a href="/logout">${esc(t('nav_logout'))}</a>` : '';
   const back = encodeURIComponent(path);
   return `<!doctype html><html lang="${lang === 'zh' ? 'zh-CN' : lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} · ${esc(t('brand'))}</title><style>${CSS}</style></head><body>
+${head(seo, title, t, lang, path)}<style>${CSS}</style></head><body>
 ${adm ? '' : BG_TRUCKS}<header><div class="in"><a class="logo" href="/"><img src="/logo.png" alt="Cargo 151" width="96" height="45"></a><nav>${nav}${logout}</nav>
 <div class="lang"><a href="/lang/ru?back=${back}" class="${lang === 'ru' ? 'on' : ''}">RU</a><a href="/lang/kk?back=${back}" class="${lang === 'kk' ? 'on' : ''}">ҚАЗ</a><a href="/lang/zh?back=${back}" class="${lang === 'zh' ? 'on' : ''}">中文</a></div></div></header>${adm ? '' : ROAD}
-<main>${body}</main>${adm ? '' : `<footer>${wa ? `<a href="https://wa.me/${wa}" target="_blank" rel="noopener">WhatsApp ${esc(waPretty)}</a> · ` : ''}<a href="https://www.instagram.com/cargo.151" target="_blank" rel="noopener">Instagram @cargo.151</a></footer>`}${wa && !adm ? `<a class="wa-fab noprint" href="https://wa.me/${wa}" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path fill="#fff" d="M16 3a13 13 0 0 0-11.2 19.6L3 29l6.6-1.7A13 13 0 1 0 16 3zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.9 1 1-3.8-.3-.4A10.6 10.6 0 1 1 16 26.6zm5.8-7.9c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1a8.7 8.7 0 0 1-4.3-3.8c-.3-.6.3-.5 1-1.7.1-.2 0-.4 0-.5l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6a1.2 1.2 0 0 0-.9.4 3.7 3.7 0 0 0-1.1 2.7 6.4 6.4 0 0 0 1.3 3.4 14.7 14.7 0 0 0 5.7 5c2.1.9 2.9 1 4 .8a3.4 3.4 0 0 0 2.2-1.6 2.8 2.8 0 0 0 .2-1.6c-.1-.1-.3-.2-.6-.4z"/></svg><span>${esc(t('write_wa'))}</span></a>` : ''}<script>${JS}</script></body></html>`;
+<main>${body}</main>${adm ? '' : `<footer>${wa ? `<a href="https://wa.me/${wa}" target="_blank" rel="noopener">WhatsApp ${esc(waPretty)}</a> · ` : ''}<a href="https://www.instagram.com/cargo.151" target="_blank" rel="noopener">Instagram @cargo.151</a>${(seo.cities || []).length ? `<div class="f-cities">${esc(t('seo_cities'))}: ${seo.cities.map(([n, sl]) => `<a href="/dostavka/${sl}">${esc(n)}</a>`).join(' · ')}</div>` : ''}</footer>`}${wa && !adm ? `<a class="wa-fab noprint" href="https://wa.me/${wa}" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path fill="#fff" d="M16 3a13 13 0 0 0-11.2 19.6L3 29l6.6-1.7A13 13 0 1 0 16 3zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.9 1 1-3.8-.3-.4A10.6 10.6 0 1 1 16 26.6zm5.8-7.9c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1a8.7 8.7 0 0 1-4.3-3.8c-.3-.6.3-.5 1-1.7.1-.2 0-.4 0-.5l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6a1.2 1.2 0 0 0-.9.4 3.7 3.7 0 0 0-1.1 2.7 6.4 6.4 0 0 0 1.3 3.4 14.7 14.7 0 0 0 5.7 5c2.1.9 2.9 1 4 .8a3.4 3.4 0 0 0 2.2-1.6 2.8 2.8 0 0 0 .2-1.6c-.1-.1-.3-.2-.6-.4z"/></svg><span>${esc(t('write_wa'))}</span></a>` : ''}<script>${JS}</script></body></html>`;
 }
 
 // Схематичная карта маршрутов: склады в Китае → города выдачи, с бегущими точками и фурой.

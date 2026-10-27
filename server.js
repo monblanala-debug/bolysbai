@@ -90,9 +90,25 @@ app.use(session({
 app.use((req, res, next) => {
   const m = /(?:^|;\s*)lang=(ru|kk|zh)/.exec(req.headers.cookie || '');
   const al = req.headers['accept-language'] || '';
-  req.lang = m ? m[1] : /^zh/i.test(al) ? 'zh' : /^kk/i.test(al) ? 'kk' : 'ru';
+  // ?lang=kk в адресе — для поисковиков и ссылок на нужный язык; запоминаем как обычный выбор.
+  const q = LANGS.includes(req.query.lang) ? req.query.lang : null;
+  if (q) res.append('Set-Cookie', `lang=${q}; Path=/; Max-Age=31536000; SameSite=Lax`);
+  req.lang = q || (m ? m[1] : /^zh/i.test(al) ? 'zh' : /^kk/i.test(al) ? 'kk' : 'ru');
   req.t = tr(req.lang);
-  res.render = (title, body) => res.send(page({ title, body, t: req.t, lang: req.lang, path: req.originalUrl.split('?')[0], session: req.session, whatsapp: setting('whatsapp') }));
+  const path = req.originalUrl.split('?')[0];
+  const noindex = SEO.NOINDEX.test(path) || Object.keys(req.query).some((k) => k !== 'lang');
+  if (noindex) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  // meta: { title, desc, jsonld } — для страниц, у которых своё описание для поиска.
+  res.render = (title, body, meta = {}) => {
+    const pm = SEO.pageMeta(req.lang, path);
+    const wa = setting('whatsapp');
+    res.send(page({ title, body, t: req.t, lang: req.lang, path, session: req.session, whatsapp: wa,
+      seo: { origin: `${req.protocol}://${req.get('host')}`, noindex, title: meta.title || (pm && pm[0]), desc: meta.desc || (pm && pm[1]),
+        // Коды подтверждения Google и Яндекса: можно вставить весь тег, берём только content.
+        verify: [['google-site-verification', setting('seo_google')], ['yandex-verification', setting('seo_yandex')]].map(([n, v]) => [n, (/content=["']([^"']+)/.exec(v || '') || [, v || ''])[1].trim()]).filter(([, v]) => v),
+        cities: path.startsWith('/admin') ? [] : db.prepare('SELECT name FROM cities ORDER BY id').all().map((c) => [c.name, SEO.slug(c.name)]),
+        alt: !noindex && (SEO.INDEXABLE.includes(path) || path.startsWith('/dostavka/')), jsonld: path === '/' || path === '/about' ? SEO.orgJson(`${req.protocol}://${req.get('host')}`, String(wa || '').replace(/\D/g, '')) : '' } }));
+  };
   next();
 });
 
@@ -151,6 +167,7 @@ const promo = (req) => {
 };
 
 // Простая разметка: «# заголовок», «- пункт», остальное — абзацы.
+const SEO = require('./seo');
 const { parse: parseInfo, infoPage, aboutPage, servicesPage } = require('./info-view');
 function renderInfo(text) {
   let html = ''; let list = false;
@@ -232,6 +249,20 @@ const lightbox = () => `<div class="rv-box" hidden><button class="rv-x" aria-lab
     a.forEach((el,k)=>el.onclick=(e)=>{e.preventDefault();show(k)});b.querySelector('.rv-x').onclick=hide;b.querySelector('.rv-p').onclick=()=>show(i-1);b.querySelector('.rv-n').onclick=()=>show(i+1);
     b.onclick=(e)=>{if(e.target===b)hide()};document.onkeydown=(e)=>{if(b.hidden)return;if(e.key==='Escape')hide();if(e.key==='ArrowLeft')show(i-1);if(e.key==='ArrowRight')show(i+1)};
     b.ontouchstart=(e)=>{x=e.touches[0].clientX};b.ontouchend=(e)=>{const d=e.changedTouches[0].clientX-x;if(Math.abs(d)>50)show(i+(d<0?1:-1))}})()</script>`;
+// Страницы городов строим из списка городов выдачи: /dostavka/almaty и т.д.
+const cityBySlug = (sl) => db.prepare('SELECT * FROM cities ORDER BY id').all().find((c) => SEO.slug(c.name) === sl);
+const AIR = { 'Алматы': 'Алматы — 3–5 дней.', 'Москва': 'Москва — 3–8 дней, быстрое и обычное авиа.' };
+app.get('/dostavka/:slug', (req, res) => {
+  const c = cityBySlug(String(req.params.slug));
+  if (!c) return res.status(404).render('404', '<div class="narrow card"><h1>404</h1><p><a href="/">← Карго 151</a></p></div>');
+  const pickup = /заполните/i.test(c.pickup_address || '') ? '' : c.pickup_address;
+  const p = SEO.cityPage(req.lang, c, { wa: String(setting('whatsapp') || '').replace(/\D/g, ''), pickup, air: req.lang === 'ru' ? AIR[c.name] : '' });
+  res.render(p.h, p.body, { title: p.title, desc: p.desc });
+});
+app.get('/robots.txt', (req, res) => res.type('text/plain').send(SEO.robots(`${req.protocol}://${req.get('host')}`)));
+app.get('/sitemap.xml', (req, res) => res.type('application/xml').send(SEO.sitemap(`${req.protocol}://${req.get('host')}`,
+  db.prepare('SELECT name FROM cities ORDER BY id').all().map((c) => `/dostavka/${SEO.slug(c.name)}`))));
+
 app.get('/reviews', (req, res) => {
   const t = req.t; const wa = setting('whatsapp'); const files = reviewFiles(); const videos = videoFiles();
   res.render(t('nav_reviews'), `<div class="iv narrow rv"><div class="iv-hero"><h1>${esc(t('nav_reviews'))}</h1><small>${esc(t('reviews_sub'))}</small></div>
@@ -1939,6 +1970,8 @@ app.get('/admin/settings', (req, res) => {
     <div><label>${esc(t('s_cny_rate'))}</label><input name="cny_rate" inputmode="decimal" value="${esc(setting('cny_rate') || '7.2')}"></div>
     <div><label>${esc(t('s_code_start'))}</label><input name="code_start" value="${esc(setting('code_start'))}"></div>
     <div><label>WhatsApp</label><input name="whatsapp" value="${esc(setting('whatsapp'))}"></div></div>
+    <div class="row"><div><label>${esc(t('s_seo_google'))}</label><input name="seo_google" value="${esc(setting('seo_google'))}" placeholder="&lt;meta name=&quot;google-site-verification&quot; …&gt;"></div>
+    <div><label>${esc(t('s_seo_yandex'))}</label><input name="seo_yandex" value="${esc(setting('seo_yandex'))}" placeholder="&lt;meta name=&quot;yandex-verification&quot; …&gt;"></div></div>
     </div>
     <p><button>${esc(t('save'))}</button></p></form>
     <div class="card" id="staff"><h2>🔑 ${esc(t('s_staff'))}</h2><p class="muted">${esc(t('s_staff_hint'))}</p>
@@ -2026,7 +2059,7 @@ app.post('/admin/settings', (req, res) => {
   if (String(b.wh_new_name_ru || '').trim() && String(b.wh_new_address || '').trim()) {
     db.prepare(`INSERT INTO warehouses (${f.join(', ')}) VALUES (${f.map(() => '?').join(', ')})`).run(...f.map((k) => String(b[`wh_new_${k}`] || '').trim()));
   }
-  for (const k of ['rate_per_kg', 'currency', 'cny_rate', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'insurance_ru', 'insurance_zh', 'invoice_company', 'invoice_title', 'invoice_rules', 'promo_title_ru', 'promo_title_zh', 'promo_text_ru', 'promo_text_zh']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
+  for (const k of ['rate_per_kg', 'currency', 'cny_rate', 'code_start', 'whatsapp', 'notice_ru', 'notice_zh', 'info_ru', 'info_zh', 'about_ru', 'about_zh', 'services_ru', 'services_zh', 'insurance_ru', 'insurance_zh', 'invoice_company', 'invoice_title', 'invoice_rules', 'promo_title_ru', 'promo_title_zh', 'promo_text_ru', 'promo_text_zh', 'seo_google', 'seo_yandex']) db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, String(b[k] ?? '').trim());
   db.exec('COMMIT');
   req.session.flash = req.t('saved');
   res.redirect('/admin/settings');
