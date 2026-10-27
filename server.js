@@ -674,22 +674,20 @@ app.use('/admin', (req, res, next) => {
 });
 
 app.get('/admin', (req, res) => {
-  const t = req.t;
+  const t = req.t; const m = canMoney(req);
   const c = (sql) => db.prepare(sql).get().c;
-  const byStatus = Object.keys(STATUSES).map((s) => `<a class="card" href="/admin/parcels?status=${s}" style="display:block;margin:0">${statusBadge(t, s)}<div class="stat">${c(`SELECT COUNT(*) c FROM parcels WHERE status = '${s}'`)}</div></a>`).join('');
   // Сводка за сегодня и за месяц (по Алматы): отправлено, прибыло, выдано, начислено, получено денег, новые клиенты.
   const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10); const month = today.slice(0, 7);
   const DAY = "COALESCE(NULLIF(inv_date, ''), substr(created_at, 1, 10))";
   const period = (p) => {
-    const m = p.length === 7 ? 'substr(%s, 1, 7)' : '%s';
-    const f = (col) => m.replace('%s', col);
+    const f = (col) => (p.length === 7 ? `substr(${col}, 1, 7)` : col);
     const sent = db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(total_weight), 0) w, COALESCE(SUM(volume), 0) v, COALESCE(SUM(amount), 0) a FROM invoices WHERE ${f(DAY)} = ?`).get(p);
     return { sent, arrived: db.prepare(`SELECT COUNT(*) n FROM invoices WHERE ${f("date(arrived_at, '+5 hours')")} = ?`).get(p).n,
       delivered: db.prepare(`SELECT COUNT(*) n FROM invoices WHERE ${f("date(delivered_at, '+5 hours')")} = ?`).get(p).n,
       got: db.prepare(`SELECT COALESCE(SUM(amount), 0) s FROM payments p WHERE ${f(PAY_DAY)} = ?`).get(p).s,
       fresh: db.prepare(`SELECT COUNT(*) n FROM clients WHERE ${f("date(created_at, '+5 hours')")} = ?`).get(p).n };
   };
-  const debtAll = db.prepare(`SELECT COALESCE(SUM(${DEBT_SQL}), 0) s FROM invoices i`).get().s;
+  const td = period(today); const mo = period(month);
   // Этот месяц против прошлого за те же дни (1-е … сегодняшнее число), чтобы сравнение было честным.
   const range = (from, to) => {
     const q = (sql) => db.prepare(sql).get(from, to);
@@ -701,36 +699,61 @@ app.get('/admin', (req, res) => {
   const prevM = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7) - 2, 1)).toISOString().slice(0, 7);
   const prevLast = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7) - 1, 0)).getUTCDate();
   const cur = range(`${month}-01`, today); const prev = range(`${prevM}-01`, `${prevM}-${String(Math.min(dnum, prevLast)).padStart(2, '0')}`);
-  const arrow = (a, b) => { if (!b) return a ? '<span style="color:var(--ok)">▲</span>' : '<span class="muted">—</span>'; const p = Math.round((a - b) / b * 100);
-    return `<span style="color:${p >= 0 ? 'var(--ok)' : 'var(--brand)'};font-weight:700">${p >= 0 ? '▲' : '▼'} ${Math.abs(p)}%</span>`; };
-  const cmpRows = [['a_rep_invoices', 'n', (v) => v], ['a_h_weight', 'w', (v) => `${num(Math.round(v / 100) / 10)} т`], ['a_h_volume', 'v', (v) => `${num(Math.round(v * 10) / 10)} м³`],
-    ...(canMoney(req) ? [['a_charged', 'a', (v) => money(v)], ['a_sum_got', 'got', (v) => money(v)]] : []), ['a_sum_new_clients', 'fresh', (v) => v]];
-  const cmp = `<div class="card tbl"><h2 style="margin-top:0">${esc(t('a_cmp_title'))}</h2><p class="muted" style="margin-top:-6px">${esc(t('a_cmp_hint').replace('{d}', dnum))}</p>
-    <table><tr><th></th><th>${esc(t('a_this_month'))}</th><th>${esc(t('a_prev_month'))}</th><th></th></tr>
-    ${cmpRows.map(([k, f, fmt]) => `<tr><td>${esc(t(k))}</td><td><b>${esc(fmt(cur[f]))}</b></td><td class="muted">${esc(fmt(prev[f]))}</td><td>${arrow(cur[f], prev[f])}</td></tr>`).join('')}</table></div>`;
+  const chip = (a, b) => { if (!b) return a ? `<span class="dchip up">▲ ${esc(t('a_d_new'))}</span>` : '<span class="muted">—</span>';
+    const p = Math.round((a - b) / b * 100); return `<span class="dchip ${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '▲' : '▼'} ${Math.abs(p)}%</span>`; };
+  const tons = (kg) => (kg >= 1000 ? `${num(Math.round(kg / 100) / 10)} т` : `${num(Math.round(kg))} кг`);
+  const m3 = (v) => `${num(r2(v))} м³`;
   // Лежат на складе: прибыли, но не выданы. Этап считаем как в списке (с учётом «Авто»).
   const lying = db.prepare("SELECT * FROM invoices WHERE inv_status = 'arrived'").all().filter((i) => invStage(i) === 'arrived');
   const lyingBy = lying.reduce((o, i) => { const k = isMsk(i.destination) ? 'Москва' : 'Алматы'; o[k] = (o[k] || 0) + 1; return o; }, {});
-  const oldest = lying.reduce((m, i) => Math.max(m, lyingDays(i) || 0), 0);
+  const cities = Object.entries(lyingBy).map(([k, n]) => `${esc(k)} <b>${n}</b>`).join(' · ');
+  const oldest = lying.reduce((x, i) => Math.max(x, lyingDays(i) || 0), 0);
   const alarm = lying.filter((i) => (lyingDays(i) || 0) >= LYING_ALARM);
-  const sumCard = (title, o) => `<div class="card"><h2 style="margin-top:0">${esc(title)}</h2><div class="sumgrid">
-    <div><span class="muted">${esc(t('a_sum_sent'))}</span><b>${o.sent.n}</b><small class="muted">${esc(num(r2(o.sent.w)))} кг · ${esc(num(r2(o.sent.v)))} м³</small></div>
-    <div><span class="muted">${esc(t('ist_arrived'))}</span><b>${o.arrived}</b></div><div><span class="muted">${esc(t('ist_delivered'))}</span><b>${o.delivered}</b></div>
-    ${canMoney(req) ? `<div><span class="muted">${esc(t('a_charged'))}</span><b>${esc(money(o.sent.a))}</b></div><div><span class="muted">${esc(t('a_sum_got'))}</span><b style="color:var(--ok)">${esc(money(o.got))}</b></div>` : ''}
-    <div><span class="muted">${esc(t('a_sum_new_clients'))}</span><b>${o.fresh}</b></div></div></div>`;
-  adminRender(req, res, t('a_dashboard'), `<a class="card" href="/admin/invoices?st=arrived" style="display:block;${alarm.length ? 'border:2px solid var(--brand);background:#fff5f5' : lying.length ? 'border:2px solid #f59e0b' : ''}"><div class="muted">🏬 ${esc(t('a_lying_title'))}</div>
-    ${alarm.length ? `<div style="color:var(--brand);font-weight:800;font-size:18px;margin:4px 0">🔔 ${esc(t('a_lying_alarm').replace('{n}', alarm.length).replace('{d}', LYING_ALARM))}: ${alarm.map((i) => esc(i.number)).slice(0, 8).join(', ')}${alarm.length > 8 ? '…' : ''}</div>` : ''}
-    <div class="row" style="align-items:baseline;gap:16px"><div class="stat" style="flex:0 0 auto">${lying.length}</div><div style="flex:1 1 auto">${Object.entries(lyingBy).map(([k, n]) => `${esc(k)}: <b>${n}</b>`).join(' · ')}${lying.length ? ` <span class="muted">· ${esc(t('a_lying_oldest'))} ${oldest} ${esc(t('a_days'))}</span>` : ''}</div></div></a>
-    <div class="grid g2">${sumCard(`${t('a_today')} · ${fmtDay(today)}`, period(today))}${sumCard(`${t('a_this_month')} · ${month.slice(5)}.${month.slice(0, 4)}`, period(month))}</div>
-    ${cmp}
-    ${canMoney(req) ? `<div class="grid g2"><a class="card" href="/admin/debts" style="display:block"><div class="muted">${esc(t('a_debt_total'))}</div><div class="stat" style="color:var(--brand)">${esc(money(debtAll))}</div></a>
-      <a class="card" href="/admin/debts?v=credit" style="display:block"><div class="muted">🤝 ${esc(t('a_credit_total'))}</div><div class="stat" style="color:var(--brand)">${esc(money(db.prepare(`SELECT COALESCE(SUM(${DEBT_SQL}), 0) s FROM invoices i WHERE i.credit = 1`).get().s))}</div></a></div>` : ''}
-    <div class="grid g4">
-    <div class="card"><div class="muted">${esc(t('a_total_clients'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM clients')}</div></div>
-    <div class="card"><div class="muted">${esc(t('a_total_parcels'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM parcels')}</div></div>
-    <div class="card"><div class="muted">${esc(t('a_unpaid'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM invoices WHERE paid = 0')}</div></div>
-    <a class="card" href="/admin/parcels?nc=1" style="display:block"><div class="muted">📦 ${esc(t('a_nc_title'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM parcels WHERE client_id IS NULL')}</div></a></div>
-    <div class="grid g4">${byStatus}</div>`);
+  const alarmNums = alarm.map((i) => esc(i.number)).slice(0, 8).join(', ') + (alarm.length > 8 ? '…' : '');
+  const alarmTxt = esc(t('a_lying_alarm').replace('{n}', alarm.length).replace('{d}', LYING_ALARM));
+  const debtAll = m ? db.prepare(`SELECT COALESCE(SUM(${DEBT_SQL}), 0) s FROM invoices i`).get().s : 0;
+  const credit = m ? db.prepare(`SELECT COALESCE(SUM(${DEBT_SQL}), 0) s, COUNT(*) n FROM invoices i WHERE i.credit = 1 AND i.paid = 0`).get() : null;
+  const unpaid = c('SELECT COUNT(*) c FROM invoices WHERE paid = 0'); const nc = c('SELECT COUNT(*) c FROM parcels WHERE client_id IS NULL');
+  // Шапка: главные цифры дня.
+  const hero = `<div class="dhero"><div class="dhero-main">${m
+    ? `<div class="lb">💵 ${esc(t('a_d_got_today'))} · ${esc(fmtDay(today))}</div><div class="huge">${esc(money(td.got))}</div><div class="mo">${esc(t('a_this_month'))}: <b>${esc(money(mo.got))}</b> ${chip(cur.got, prev.got)}</div>`
+    : `<div class="lb">🚚 ${esc(t('a_d_sent_today'))} · ${esc(fmtDay(today))}</div><div class="huge">${td.sent.n}</div><div class="mo">${esc(tons(td.sent.w))} · ${esc(m3(td.sent.v))}</div>`}</div>
+    <div class="dhero-nums"><a href="/admin/invoices"><small>🚚 ${esc(t('a_d_sent_today'))}</small><b>${td.sent.n}</b><small>${esc(tons(td.sent.w))}</small></a>
+    <a href="/admin/invoices?st=arrived"><small>🏬 ${esc(t('a_d_in_wh'))}</small><b class="${alarm.length ? 'bad' : ''}">${lying.length}</b><small>${alarm.length ? `🔔 ${alarm.length} · ${LYING_ALARM}+ ${esc(t('a_days'))}` : esc(t('a_d_all_ok'))}</small></a>
+    ${m ? `<a href="/admin/debts"><small>💳 ${esc(t('a_d_wait_pay'))}</small><b>${esc(money(debtAll))}</b><small>${unpaid} ${esc(t('a_d_invs'))}</small></a>`
+      : `<a href="/admin/parcels?nc=1"><small>📦 ${esc(t('a_nc_title'))}</small><b>${nc}</b><small>${esc(t('a_total_parcels'))}: ${c('SELECT COUNT(*) c FROM parcels')}</small></a>`}</div></div>
+    ${alarm.length ? `<a class="dalarm" href="/admin/invoices?st=arrived">🔔 ${alarmTxt}: ${alarmNums} · ${cities} → ${esc(t('a_d_open_list'))}</a>` : ''}`;
+  // График: вес отправленного по дням за 30 дней.
+  const days = []; for (let k = 29; k >= 0; k--) { const x = new Date(`${today}T00:00:00Z`); x.setUTCDate(x.getUTCDate() - k); days.push(x.toISOString().slice(0, 10)); }
+  const by = Object.fromEntries(db.prepare(`SELECT ${DAY} d, COALESCE(SUM(total_weight), 0) w, COUNT(*) n FROM invoices WHERE ${DAY} >= ? GROUP BY d`).all(days[0]).map((r) => [r.d, r]));
+  const wmax = Math.max(1, ...days.map((d) => (by[d] ? by[d].w : 0)));
+  const bars = days.map((d) => { const r = by[d] || { w: 0, n: 0 };
+    return `<div class="${d === today ? 'now' : ''}" style="height:${Math.max(1.5, r.w / wmax * 100)}%" title="${esc(fmtDay(d))}: ${esc(tons(r.w))}, ${esc(t('a_rep_invoices'))}: ${r.n}"></div>`; }).join('');
+  const chart = `<div class="card"><div class="dhead"><h2>${esc(t('a_d_chart'))}</h2><small>${esc(tons(days.reduce((s, d) => s + (by[d] ? by[d].w : 0), 0)))} · ${esc(t('a_d_chart_hint'))}</small></div>
+    <div class="dbars">${bars}</div><div class="dax"><span>${esc(fmtDay(days[0]))}</span><span>${esc(fmtDay(days[15]))}</span><span>${esc(t('a_d_today_short'))}</span></div></div>`;
+  // Таблица: сегодня, месяц (полоска: месяц, черта: прошлый месяц за те же дни), изменение.
+  const row = (k, a, b, ca, cb) => { const top = Math.max(ca, cb, 1);
+    return `<tr><td>${esc(t(k))}</td><td><b>${a}</b></td><td><b>${b}</b><div class="dmini"><i style="width:${ca / top * 100}%"></i><s style="left:${cb / top * 100}%"></s></div></td><td>${chip(ca, cb)}</td></tr>`; };
+  const score = `<div class="card tbl"><div class="dhead"><h2>${esc(t('a_today'))} · ${esc(t('a_this_month'))}</h2><small>${esc(t('a_cmp_hint').replace('{d}', dnum))}</small></div>
+    <table class="dscore"><tr><th></th><th>${esc(t('a_today'))}</th><th>${esc(t('a_this_month'))} <span>(${esc(t('a_d_prev_mark'))})</span></th><th>${esc(t('a_d_vs_prev'))}</th></tr>
+    ${row('a_rep_invoices', td.sent.n, mo.sent.n, cur.n, prev.n)}${row('a_h_weight', esc(tons(td.sent.w)), esc(tons(mo.sent.w)), cur.w, prev.w)}${row('a_h_volume', esc(m3(td.sent.v)), esc(m3(mo.sent.v)), cur.v, prev.v)}
+    ${m ? row('a_charged', esc(money(td.sent.a)), esc(money(mo.sent.a)), cur.a, prev.a) + row('a_sum_got', `<span class="okc">${esc(money(td.got))}</span>`, `<span class="okc">${esc(money(mo.got))}</span>`, cur.got, prev.got) : ''}
+    ${row('a_sum_new_clients', td.fresh, mo.fresh, cur.fresh, prev.fresh)}
+    <tr><td>${esc(t('a_d_arr_del'))}</td><td><b>${td.arrived} / ${td.delivered}</b></td><td><b>${mo.arrived} / ${mo.delivered}</b></td><td></td></tr></table></div>`;
+  // Справа: что требует внимания и посылки по статусам.
+  const att = (color, label, sub, n, href) => `<a href="${href}"><span class="dot" style="background:${color}"></span><span>${label}${sub ? `<small>${sub}</small>` : ''}</span><span class="n">${n}</span></a>`;
+  const attention = `<div class="card datt"><h2>⚠️ ${esc(t('a_d_attention'))}</h2>
+    ${att('var(--brand)', esc(t('a_d_no_pick').replace('{d}', LYING_ALARM)), alarm.length ? alarmNums : esc(t('a_d_none')), alarm.length, '/admin/invoices?st=arrived')}
+    ${att('#f59e0b', esc(t('a_d_in_wh')), `${cities || '—'}${lying.length ? ` · ${esc(t('a_d_up_to'))} ${oldest} ${esc(t('a_days'))}` : ''}`, lying.length, '/admin/invoices?st=arrived')}
+    ${m ? att('#e5262d', esc(t('a_d_wait_pay')), `${unpaid} ${esc(t('a_d_invs'))}`, esc(money(debtAll)), '/admin/debts') + att('#ea7a06', `🤝 ${esc(t('a_credit_total'))}`, `${credit.n} ${esc(t('a_d_invs'))}`, esc(money(credit.s)), '/admin/debts?v=credit') : ''}
+    ${att('#6366f1', esc(t('a_nc_title')), esc(t('a_d_assign')), nc, '/admin/parcels?nc=1')}</div>`;
+  const st = Object.keys(STATUSES).map((s) => [s, c(`SELECT COUNT(*) c FROM parcels WHERE status = '${s}'`)]);
+  const stTot = st.reduce((s, [, n]) => s + n, 0);
+  const parcels = `<div class="card"><h2>📦 ${esc(t('a_total_parcels'))} · ${stTot}</h2>
+    ${stTot ? `<div class="dseg">${st.filter(([, n]) => n).map(([s, n]) => `<i class="s-${s}" style="flex:${n}" title="${esc(t('st_' + s))}: ${n}"></i>`).join('')}</div>` : ''}
+    <div class="dleg">${st.map(([s, n]) => `<a href="/admin/parcels?status=${s}"><i class="s-${s}"></i>${esc(t('st_' + s))}<b>${n}</b></a>`).join('')}</div>
+    <div class="dfoot"><span>👤 ${esc(t('a_total_clients'))} <b>${c('SELECT COUNT(*) c FROM clients')}</b></span><span>🆕 ${esc(t('a_this_month'))} <b>${mo.fresh}</b> ${chip(cur.fresh, prev.fresh)}</span></div></div>`;
+  adminRender(req, res, t('a_dashboard'), `${hero}<div class="dgrid"><div>${chart}${score}</div><div>${attention}${parcels}</div></div>`);
 });
 
 app.get('/admin/clients', (req, res) => {
