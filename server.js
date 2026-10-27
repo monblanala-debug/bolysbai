@@ -147,6 +147,8 @@ for (const [path, key] of [['/about', 'about'], ['/services', 'services'], ['/in
 }
 
 app.get('/', (req, res) => {
+  // Клиент уже вошёл — регистрация ему не нужна, сразу в кабинет.
+  if (req.session.clientId && getClient(req.session.clientId)) return res.redirect('/cabinet');
   const t = req.t;
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   res.render(t('nav_home'), `<div class="narrow"><div class="card login-top"><b>${esc(t('have_code'))}</b>

@@ -126,7 +126,9 @@ hero.querySelectorAll('[data-to="'+g.dataset.key+'"]').forEach(x=>x.classList.ad
 function page({ title, body, t, lang, path, session, whatsapp }) {
   const wa = String(whatsapp || '').replace(/\D/g, '');
   const waPretty = wa.length === 13 ? `+${wa.slice(0, 2)} ${wa.slice(2, 5)} ${wa.slice(5, 9)} ${wa.slice(9)}` : `+${wa}`;
-  const navItems = [['/', 'nav_home'], ['/track', 'nav_track'], ['/cabinet', 'nav_cabinet'], ['/services', 'nav_services'], ['/about', 'nav_about'], ['/info', 'nav_info']];
+  // Клиент уже вошёл — «Получить код» ему не нужен, вместо него адрес склада в Китае.
+  const first = session && session.clientId ? ['/address', 'china_address'] : ['/', 'nav_home'];
+  const navItems = [first, ['/track', 'nav_track'], ['/cabinet', 'nav_cabinet'], ['/services', 'nav_services'], ['/about', 'nav_about'], ['/info', 'nav_info']];
   const isOn = (href) => (href === '/' ? ['/', '/code', '/address'].includes(path) : path.startsWith(href) || (href === '/cabinet' && path.startsWith('/invoice')));
   const nav = navItems.map(([href, k]) => `<a href="${href}" class="${isOn(href) ? 'on' : ''}">${esc(t(k))}</a>`).join('');
   const logout = session && (session.clientId || session.admin) ? `<a href="/logout">${esc(t('nav_logout'))}</a>` : '';
