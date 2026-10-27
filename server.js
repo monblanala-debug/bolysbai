@@ -271,6 +271,8 @@ const payBadge = (t, i) => {
   const p = paidSum(i.id);
   return p > 0 ? `<span class="badge b-transit">${esc(t('pay_part'))}: ${esc(money(p))} / ${esc(money(i.amount))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`;
 };
+// Только для админки: клиент «в долг» не видит.
+const creditBadge = (t, i) => (i.credit && !i.paid ? ` <span class="badge b-border" style="background:#fecaca">🤝 ${esc(t('a_credit'))}</span>` : '');
 const staffWho = (req) => req.session.staffName || '';
 function addPayment(req, id, amount, method, note) {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
@@ -385,7 +387,7 @@ function invoicesTable(t, invoices, base, withPaid = true, canDelete = false) {
   <td>${esc(cargoSummary(t, i))}</td><td style="white-space:nowrap"><b>${esc(money(i.amount))}</b></td>
   <td style="min-width:170px"><div style="margin-bottom:4px">${invBadge(t, i)}</div>
     <form method="post" action="/admin/invoices/${i.id}/status" style="margin-bottom:4px"><input type="hidden" name="back" class="back"><select name="inv_status" onchange="this.form.submit()" class="rowsel" title="${esc(t('a_set_status'))}">${invStatusOptions(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'auto')}</select></form>
-    ${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${payBadge(t, i)}</td>
+    ${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${payBadge(t, i)}${creditBadge(t, i)}</td>
   <td><div style="display:grid;gap:6px"><a class="btn sec sm" href="${base}${i.id}">${esc(t('a_open'))}</a>${photoForm(t, i.id, '/admin/invoices')}${i.pc ? `<span class="muted">📷 ${i.pc}</span>` : ''}</div></td>
   <td><form method="post" action="/admin/invoices/${i.id}/note" class="rownote"><input type="hidden" name="back" class="back"><textarea name="staff_note" rows="2" placeholder="${esc(t('a_inv_note_short'))}">${esc(i.staff_note || '')}</textarea>
     <div class="row" style="align-items:center;gap:6px;margin-top:4px"><button class="sec sm" style="flex:0 0 auto">${esc(t('save'))}</button>${i.staff_note ? `<span class="muted" style="font-size:12px">${esc(noteBy(t, i))}</span>` : ''}</div></form></td></tr>`; }).join('')}</table></div>
@@ -685,7 +687,8 @@ app.get('/admin', (req, res) => {
     ${canMoney(req) ? `<div><span class="muted">${esc(t('a_charged'))}</span><b>${esc(money(o.sent.a))}</b></div><div><span class="muted">${esc(t('a_sum_got'))}</span><b style="color:var(--ok)">${esc(money(o.got))}</b></div>` : ''}
     <div><span class="muted">${esc(t('a_sum_new_clients'))}</span><b>${o.fresh}</b></div></div></div>`;
   adminRender(req, res, t('a_dashboard'), `<div class="grid g2">${sumCard(`${t('a_today')} · ${fmtDay(today)}`, period(today))}${sumCard(`${t('a_this_month')} · ${month.slice(5)}.${month.slice(0, 4)}`, period(month))}</div>
-    ${canMoney(req) ? `<a class="card" href="/admin/debts" style="display:block"><div class="muted">${esc(t('a_debt_total'))}</div><div class="stat" style="color:var(--brand)">${esc(money(debtAll))}</div></a>` : ''}
+    ${canMoney(req) ? `<div class="grid g2"><a class="card" href="/admin/debts" style="display:block"><div class="muted">${esc(t('a_debt_total'))}</div><div class="stat" style="color:var(--brand)">${esc(money(debtAll))}</div></a>
+      <a class="card" href="/admin/debts?v=credit" style="display:block"><div class="muted">🤝 ${esc(t('a_credit_total'))}</div><div class="stat" style="color:var(--brand)">${esc(money(db.prepare(`SELECT COALESCE(SUM(${DEBT_SQL}), 0) s FROM invoices i WHERE i.credit = 1`).get().s))}</div></a></div>` : ''}
     <div class="grid g4">
     <div class="card"><div class="muted">${esc(t('a_total_clients'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM clients')}</div></div>
     <div class="card"><div class="muted">${esc(t('a_total_parcels'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM parcels')}</div></div>
@@ -1090,7 +1093,7 @@ function importInvoices(req, res) {
 app.get('/admin/invoices', (req, res) => {
   const t = req.t;
   // Фильтр для бухгалтера: поиск по коду/номеру/имени, дата отправки, этап, оплата.
-  const f = { q: String(req.query.q || '').trim().slice(0, 60), day: /^\d{4}-\d{2}-\d{2}$/.test(req.query.day || '') ? req.query.day : '', st: ['transit', 'arrived', 'delivered'].includes(req.query.st) ? req.query.st : '', paid: ['0', '1'].includes(req.query.paid) ? req.query.paid : '' };
+  const f = { q: String(req.query.q || '').trim().slice(0, 60), day: /^\d{4}-\d{2}-\d{2}$/.test(req.query.day || '') ? req.query.day : '', st: ['transit', 'arrived', 'delivered'].includes(req.query.st) ? req.query.st : '', paid: ['0', '1', 'c'].includes(req.query.paid) ? req.query.paid : '' };
   const DAY = "COALESCE(NULLIF(i.inv_date, ''), substr(i.created_at, 1, 10))";
   const where = []; const args = [];
   if (f.q.includes('-')) { where.push('i.number LIKE ?'); args.push(`%${f.q}%`); } else if (f.q) {
@@ -1098,7 +1101,8 @@ app.get('/admin/invoices', (req, res) => {
     where.push('(i.number LIKE ? OR c.code = ? OR c.code = ? OR c.name LIKE ?)'); args.push(`%${f.q}%`, key, f.q.toUpperCase(), `%${f.q}%`);
   }
   if (f.day) { where.push(`${DAY} = ?`); args.push(f.day); }
-  if (f.paid) { where.push('i.paid = ?'); args.push(+f.paid); }
+  if (f.paid === 'c') where.push('i.paid = 0 AND i.credit = 1');
+  else if (f.paid) { where.push('i.paid = ?'); args.push(+f.paid); }
   const filtered = f.q || f.day || f.st || f.paid;
   let invoices = db.prepare(`SELECT i.*, c.code, c.name, c.note client_note, ${DAY} day, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i JOIN clients c ON c.id = i.client_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY day DESC, i.id DESC LIMIT ${filtered ? 2000 : 300}`).all(...args);
@@ -1109,7 +1113,7 @@ app.get('/admin/invoices', (req, res) => {
     <div style="flex:2 1 200px"><label>${esc(t('a_f_search'))}</label><input name="q" value="${esc(f.q)}" placeholder="D1600, 9866-1024-4"></div>
     <div><label>${esc(t('a_f_day'))}</label><select name="day">${opt('', f.day, t('a_f_all_days'))}${days.map((d) => opt(d.d, f.day, `${fmtDay(d.d)} · ${d.n}`)).join('')}</select></div>
     <div><label>${esc(t('status'))}</label><select name="st">${opt('', f.st, t('a_f_all'))}${opt('transit', f.st, t('a_f_transit'))}${opt('arrived', f.st, t('ist_arrived'))}${opt('delivered', f.st, t('ist_delivered'))}</select></div>
-    ${canMoney(req) ? `<div><label>${esc(t('paid'))}</label><select name="paid">${opt('', f.paid, t('a_f_all'))}${opt('0', f.paid, t('unpaid'))}${opt('1', f.paid, t('paid'))}</select></div>` : ''}
+    ${canMoney(req) ? `<div><label>${esc(t('paid'))}</label><select name="paid">${opt('', f.paid, t('a_f_all'))}${opt('0', f.paid, t('unpaid'))}${opt('c', f.paid, '🤝 ' + t('a_credit'))}${opt('1', f.paid, t('paid'))}</select></div>` : ''}
     <button style="flex:0 0 auto">${esc(t('a_f_show'))}</button>${filtered ? `<a class="btn sec" style="flex:0 0 auto" href="/admin/invoices">${esc(t('a_f_reset'))}</a>` : ''}</form>
     ${filtered ? `<p class="muted" style="margin:8px 0 0">${esc(t('a_f_found'))}: ${invoices.length}</p>` : ''}`;
   adminRender(req, res, t('a_invoices'), `${canMoney(req) ? `<div class="card"><form method="get" action="/admin/invoices/new" class="row"><div><label>${esc(t('a_pick_client'))}</label><input name="code" required placeholder="D1600"></div><button>${esc(t('a_new_invoice'))}</button><a class="btn sec" href="/admin/import#inv">${esc(t('a_inv_import'))}</a></form></div>` : ''}
@@ -1227,9 +1231,11 @@ app.get('/admin/invoices/:id', (req, res) => {
   const cl = db.prepare('SELECT id, code, name, note FROM clients WHERE id = ?').get(inv.client_id) || {};
   const pays = db.prepare('SELECT * FROM payments WHERE invoice_id = ? ORDER BY id').all(inv.id);
   const debt = invDebt(inv);
-  const money2 = canMoney(req) ? `<div class="card noprint"><h2 style="margin-top:0">${esc(t('a_payments'))} ${payBadge(t, inv)}</h2>
+  const money2 = canMoney(req) ? `<div class="card noprint"><h2 style="margin-top:0">${esc(t('a_payments'))} ${payBadge(t, inv)}${creditBadge(t, inv)}</h2>
     <p>${esc(t('total'))}: <b>${esc(money(inv.amount))}</b> · ${esc(t('a_rep_paid'))}: <b>${esc(money((inv.amount || 0) - debt))}</b> · ${esc(t('a_debt'))}: <b style="color:${debt > 0 ? 'var(--brand)' : 'var(--ok)'}">${esc(money(debt))}</b></p>
     ${pays.length ? paymentsTable(req, pays.map((p) => ({ ...p, number: '' })), false) : ''}
+    ${debt > 0 ? `<form method="post" action="/admin/invoices/${inv.id}/credit" class="row" style="align-items:center;margin-top:10px"><input type="hidden" name="credit" value="${inv.credit ? 0 : 1}">
+      <button class="sec" style="flex:0 0 auto">🤝 ${esc(t(inv.credit ? 'a_credit_off' : 'a_credit_on'))}</button><span class="muted" style="font-size:13px">${inv.credit ? `${esc(t('a_credit'))}: ${esc(ROLES.includes(inv.credit_by) ? t('role_' + inv.credit_by) : inv.credit_by)} · ${esc(fmtDate(utcToAlmaty(inv.credit_at)))}` : esc(t('a_credit_hint'))}</span></form>` : ''}
     ${debt > 0 ? `<form method="post" action="/admin/invoices/${inv.id}/payments" class="row" style="align-items:flex-end;margin-top:10px">
       <div><label>${esc(t('a_pay_amount'))}, $</label><input name="amount" inputmode="decimal" value="${esc(String(debt))}" required></div>
       <div><label>${esc(t('a_pay_method'))}</label><select name="method">${PAY_METHODS.map((m) => `<option value="${m}" ${m === (isMsk(inv.destination) ? 'cash_msk' : 'cash_ala') ? 'selected' : ''}>${esc(t('pay_' + m))}</option>`).join('')}</select></div>
@@ -1348,6 +1354,12 @@ app.post('/admin/invoices/:id/note', (req, res) => {
   db.prepare('UPDATE invoices SET staff_note = ?, staff_note_by = ?, staff_note_at = datetime(\'now\') WHERE id = ?').run(String(req.body.staff_note || '').trim().slice(0, 500), staffWho(req) || req.session.admin, id);
   res.redirect(rowBack(req, id));
 });
+app.post('/admin/invoices/:id/credit', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (req.body.credit === '1') db.prepare("UPDATE invoices SET credit = 1, credit_at = datetime('now'), credit_by = ? WHERE id = ?").run(staffWho(req) || req.session.admin, id);
+  else db.prepare('UPDATE invoices SET credit = 0 WHERE id = ?').run(id);
+  res.redirect(rowBack(req, id));
+});
 app.post('/admin/invoices/:id/status', (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (INV_STATUSES.includes(req.body.inv_status)) db.prepare('UPDATE invoices SET inv_status = ? WHERE id = ?').run(req.body.inv_status, id);
@@ -1359,22 +1371,27 @@ app.post('/admin/clients/:id/note', (req, res) => {
   res.redirect(`/admin/clients/${id}`);
 });
 
-// ---------- Должники ----------
+// ---------- К оплате: все неоплаченные накладные и отдельно «в долг» (отдали груз без оплаты) ----------
 app.get('/admin/debts', (req, res) => {
-  const t = req.t; const owner = isOwner(req);
+  const t = req.t; const owner = isOwner(req); const credit = req.query.v === 'credit';
   const DAY = "COALESCE(NULLIF(i.inv_date, ''), substr(i.created_at, 1, 10))";
-  const rows = db.prepare(`SELECT c.id, c.code, c.name, c.phone, c.note, COUNT(*) n, SUM(${DEBT_SQL}) debt, MIN(${DAY}) oldest
-    FROM invoices i JOIN clients c ON c.id = i.client_id WHERE ${DEBT_SQL} > 0.009 GROUP BY c.id ORDER BY debt DESC`).all();
-  const total = rows.reduce((s, r) => s + r.debt, 0);
+  const rows = db.prepare(`SELECT c.id, c.code, c.name, c.phone, c.note, COUNT(*) n, SUM(${DEBT_SQL}) debt, MIN(${credit ? "date(i.credit_at, '+5 hours')" : DAY}) oldest, MIN(i.id) one
+    FROM invoices i JOIN clients c ON c.id = i.client_id WHERE ${DEBT_SQL} > 0.009 ${credit ? 'AND i.credit = 1' : ''} GROUP BY c.id ORDER BY debt DESC`).all();
+  const sumOf = (cr) => db.prepare(`SELECT COALESCE(SUM(${DEBT_SQL}), 0) s FROM invoices i WHERE ${cr ? 'i.credit = 1 AND ' : ''}${DEBT_SQL} > 0.009`).get().s;
   const today = almatyDay(new Date());
-  adminRender(req, res, t('a_debts'), `<div class="grid g4"><div class="card"><div class="muted">${esc(t('a_debt_total'))}</div><div class="stat" style="color:var(--brand)">${esc(money(total))}</div></div>
-    <div class="card"><div class="muted">${esc(t('a_debtors'))}</div><div class="stat">${rows.length}</div></div></div>
-    <div class="card tbl">${rows.length ? `<table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_debt'))}</th><th>${esc(t('a_debt_since'))}</th></tr>
-    ${rows.map((r) => { const days = today - almatyDay(new Date(r.oldest + 'T00:00:00+05:00'));
+  const pays = db.prepare('SELECT p.*, i.number FROM payments p JOIN invoices i ON i.id = p.invoice_id ORDER BY p.id DESC LIMIT 30').all();
+  const tab = (v, label, sum) => `<a class="card" href="/admin/debts${v ? '?v=' + v : ''}" style="display:block;margin:0;${(v === 'credit') === credit ? 'border:2px solid var(--brand)' : ''}"><div class="muted">${esc(label)}</div><div class="stat" style="color:var(--brand)">${esc(money(sum))}</div></a>`;
+  adminRender(req, res, t('a_debts'), `<div class="grid g4" style="margin-bottom:16px">${tab('', t('a_debt_total'), sumOf(false))}${tab('credit', `🤝 ${t('a_credit_total')}`, sumOf(true))}</div>
+    <p class="muted">${esc(credit ? t('a_credit_hint') : t('a_pay_where'))}</p>
+    <div class="card tbl">${rows.length ? `<table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_debt'))}</th><th>${esc(t(credit ? 'a_credit_since' : 'a_debt_since'))}</th><th></th></tr>
+    ${rows.map((r) => { const days = r.oldest ? today - almatyDay(new Date(r.oldest + 'T00:00:00+05:00')) : 0;
+      const list = `/admin/invoices?q=${encodeURIComponent(dispCode(r.code))}&paid=0`;
       return `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(dispCode(r.code))}</b></a></td><td>${esc(r.name)}${noteTag(r.note)}</td>
       ${owner ? `<td>${isStub(r) ? '' : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}
-      <td><a href="/admin/invoices?q=${encodeURIComponent(dispCode(r.code))}&paid=0">${r.n}</a></td><td><b style="color:var(--brand)">${esc(money(r.debt))}</b></td>
-      <td>${esc(fmtDay(r.oldest))}${days > 0 ? ` <span class="muted">· ${days} ${esc(t('a_days'))}</span>` : ''}</td></tr>`; }).join('')}</table>` : `<p class="muted">${esc(t('a_rep_no_debts'))}</p>`}</div>`);
+      <td><a href="${list}">${r.n}</a></td><td style="white-space:nowrap"><b style="color:var(--brand)">${esc(money(r.debt))}</b></td>
+      <td style="white-space:nowrap">${esc(fmtDay(r.oldest))}${days > 0 ? ` <span class="muted">· ${days} ${esc(t('a_days'))}</span>` : ''}</td>
+      <td><a class="btn sm" href="${r.n === 1 ? `/admin/invoices/${r.one}` : list}">${esc(t('a_pay_add'))}</a></td></tr>`; }).join('')}</table>` : `<p class="muted">${esc(t('a_rep_no_debts'))}</p>`}</div>
+    ${pays.length ? `<div class="card tbl"><h2>${esc(t('a_recent_pays'))}</h2>${paymentsTable(req, pays, true)}</div>` : ''}`);
 });
 
 // ---------- По дням (владелец): сколько отправили и сколько денег приняли каждый день ----------
@@ -1420,6 +1437,7 @@ const LOG_RULES = [
   [/^\/invoices\/(\d+)\/paid$/, (b) => (b.paid === '1' ? 'log_inv_paid' : 'log_inv_unpaid')],
   [/^\/invoices\/(\d+)\/note$/, 'log_inv_note'],
   [/^\/invoices\/(\d+)\/status$/, 'log_inv_status'],
+  [/^\/invoices\/(\d+)\/credit$/, (b) => (b.credit === '1' ? 'log_credit_on' : 'log_credit_off')],
   [/^\/invoices\/(\d+)\/delete$/, 'log_inv_del'],
   [/^\/invoices\/(\d+)\/photos/, 'log_photo'],
   [/^\/invoices\/(\d+)$/, 'log_inv_edit'],

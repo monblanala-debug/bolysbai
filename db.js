@@ -161,6 +161,10 @@ for (const [table, col, def] of [
   ['invoices', 'staff_note', "TEXT DEFAULT ''"],
   ['invoices', 'staff_note_by', "TEXT DEFAULT ''"],
   ['invoices', 'staff_note_at', 'TEXT'],
+  // «В долг»: отдали груз без оплаты — это и есть долг (просто неоплаченное долгом не считаем).
+  ['invoices', 'credit', 'INTEGER DEFAULT 0'],
+  ['invoices', 'credit_at', 'TEXT'],
+  ['invoices', 'credit_by', "TEXT DEFAULT ''"],
   ['invoices', 'arrived_at', 'TEXT'],
   ['invoices', 'delivered_at', 'TEXT'],
 ]) {
