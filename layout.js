@@ -32,7 +32,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;p
 .seg label input:checked+span{background:var(--brand);color:#fff;box-shadow:0 2px 8px rgba(229,38,45,.3)}.seg label input:checked+span::before{content:'✓ '}.seg label input:focus-visible+span{outline:2px solid var(--brand)}
 .codebar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-color:var(--brand);background:var(--brand-soft)}.center{text-align:center}.code.big{font-size:44px;margin:8px 0}.wide{width:100%;margin-top:16px;text-align:center}
 .hint{font-size:13px;color:var(--muted);background:#faf5f5;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:6px}
-.pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}.pick label{margin:0;cursor:pointer}.pick input{position:absolute;opacity:0;pointer-events:none}
+.pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}.pick label{margin:0;cursor:pointer;position:relative}.pick input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;left:0;top:0}
 .pick span{display:block;text-align:center;padding:12px 6px;border:2px solid var(--line);border-radius:10px;font-weight:700;font-size:16px;background:#fff;transition:all .15s}
 .pick label:hover span{border-color:var(--brand)}.pick input:checked+span{background:var(--brand);border-color:var(--brand);color:#fff}.pick input:focus-visible+span{outline:3px solid #f5b5b7;outline-offset:2px}
 .steps{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}.steps span{flex:1;min-width:90px;text-align:center;padding:8px;border-radius:8px;background:#fff;border:1px solid var(--line);font-size:13px;color:var(--muted)}
