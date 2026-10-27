@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { db, dispCode, codeKey, STATUSES, setting, normPhone, nextClientCode, shippingMark, upsertParcel, addEvent, numOrNull, linkOrphanParcels } = require('./db');
 const { t: tr, LANGS } = require('./i18n');
 const { page, esc, heroMap, statusLine } = require('./layout');
+const { goodsRu } = require('./goods-ru');
 const { readScanFile, parseScan } = require('./scanner');
 
 // Владелец входит логином admin и паролем из /etc/cargo151.env — так доступ не потеряется никогда.
@@ -462,13 +463,13 @@ app.post('/cabinet/login', (req, res) => {
 // Накладная повторяет бумажный 货运单: подписи на двух языках сразу, внизу правила перевозки.
 const num = (v) => (v ? String(Math.round(v * 1000) / 1000) : '0');
 const fmtDay = (s) => (s ? String(s).slice(0, 10).split('-').reverse().join('.') : '');
-const cargoSummary = (t, i) => [i.goods, i.pieces ? `${i.pieces} ${t('inv_pcs')}` : '', i.total_weight ? `${num(i.total_weight)} ${t('kg')}` : '', i.volume ? `${num(i.volume)} м³` : '']
+const cargoSummary = (t, i) => [goodsRu(i.goods), i.pieces ? `${i.pieces} ${t('inv_pcs')}` : '', i.total_weight ? `${num(i.total_weight)} ${t('kg')}` : '', i.volume ? `${num(i.volume)} м³` : '']
   .filter(Boolean).join(' · ');
 // «3.13到» из таблицы склада → «Прибыл 13.03».
 const cargoStatus = (t, s) => String(s || '').trim().replace(/^(\d{1,2})\.(\d{1,2})\s*到$/, (m, mo, d) => `${t('inv_arrived')} ${d.padStart(2, '0')}.${mo.padStart(2, '0')}`);
 const CITY_ZH = { Алматы: '阿拉木图', Москва: '莫斯科', Бишкек: '比什凯克' };
 const INV_HEAD = [
-  ['origin', '始发地', 'Пункт вылета'], ['destination', '目的地', 'Пункт назначения'], ['transport', '运输方式', 'Способ перевозки'],
+  ['origin', '始发地', 'Пункт отправки'], ['destination', '目的地', 'Пункт назначения'], ['transport', '运输方式', 'Способ перевозки'],
   ['number', '货号', 'Код груза'], ['inv_date', '发货日期', 'Дата отправки'],
   ['sender', '发货人', 'Грузоотправитель'],
 ];
@@ -488,8 +489,9 @@ const isMsk = (d) => /москв|мәскеу|莫斯科|19公里/i.test(destName
 const etaFor = (t, invs, city) => t((invs.length ? invs.every((i) => isMsk(i.destination)) : isMsk(city)) ? 'track_eta_msk' : 'track_eta');
 function invoiceValue(inv, k) {
   if (k === 'destination') return destName(inv.destination);
+  if (k === 'goods') return goodsRu(inv.goods);
   if (k === 'inv_date') return fmtDay(inv.inv_date || inv.created_at);
-  if (k === 'rate') return inv.rate ? `${num(inv.rate)} $\u2060/\u2060${inv.price_basis === 'kg' ? 'кг' : 'м³'}` : '0';
+  if (k === 'rate') return inv.rate ? `${num(inv.rate)}\u00a0$/${inv.price_basis === 'kg' ? 'кг' : 'м³'}` : '0';
   if (k === 'ins_rate') return `${num(inv.ins_rate)}%`;
   return NUM_FIELDS.includes(k) ? num(inv[k]) : inv[k] || '';
 }
@@ -504,7 +506,7 @@ function waClient(req, inv) {
 }
 function invoicePage(req, inv) {
   const t = req.t;
-  const cell = ([k, zh, ru]) => `<div class="c"><div class="l">${esc(zh)}<br>${esc(ru)}</div><div class="v">${esc(invoiceValue(inv, k))}</div></div>`;
+  const cell = ([k, zh, ru]) => `<div class="c"><div class="l">${esc(zh)}<br>${esc(ru)}</div><div class="v${k === 'rate' ? ' nw' : k === 'goods' ? ' gd' : ''}">${esc(invoiceValue(inv, k))}</div></div>`;
   const rules = String(setting('invoice_rules') || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const parcels = db.prepare('SELECT track FROM parcels WHERE invoice_id = ? ORDER BY id').all(inv.id);
   const photos = invoicePhotos(inv.id);
@@ -794,7 +796,7 @@ app.get('/admin/import', (req, res) => {
     <button class="wide">${esc(t('a_upload'))}</button>
     <details style="margin-top:12px"><summary class="muted">${esc(t('a_more'))}</summary><div class="row" style="margin-top:8px">
     <div><label>${esc(t('a_inv_default_date'))}</label><input type="date" name="inv_date" value="${new Date().toISOString().slice(0, 10)}"></div>
-    <div><label>始发地 · Пункт вылета</label><select name="origin">${activeWarehouses().map((x) => `<option>${esc(`${x.name_zh}/${x.name_ru}`)}</option>`).join('')}</select></div></div>
+    <div><label>始发地 · Пункт отправки</label><select name="origin">${activeWarehouses().map((x) => `<option>${esc(`${x.name_zh}/${x.name_ru}`)}</option>`).join('')}</select></div></div>
     <p class="muted" style="font-size:14px">${esc(t('a_inv_import_hint'))} <a href="/admin/invoice-template.xlsx">${esc(t('a_template'))}</a></p></details></form></div>
     ${scanForm(t)}
     <details class="card"><summary class="muted">${esc(t('a_parcels_import'))}</summary><p class="muted">${esc(t('a_import_hint'))}</p>
@@ -1039,7 +1041,7 @@ function invoiceForm(req, client, inv) {
   <datalist id="dl-dest">${Object.entries(CITY_ZH).map(([ru, zh]) => `<option value="${esc(`${zh} ${ru}`)}">`).join('')}</datalist>
   <datalist id="dl-tr"><option value="陆运 Авто"><option value="铁路 ЖД"><option value="空运 Авиа"></datalist>
   <datalist id="dl-pack"><option value="编织袋 Мешок"><option value="纸箱 Коробка"><option value="木架 Обрешётка"><option value="木架+加固 Обрешётка+усиление"></datalist>
-  <div class="row">${inp('origin', '始发地', 'Пункт вылета', 'list="dl-origin"')}${inp('destination', '目的地', 'Пункт назначения', 'list="dl-dest"')}${inp('transport', '运输方式', 'Способ перевозки', 'list="dl-tr"')}</div>
+  <div class="row">${inp('origin', '始发地', 'Пункт отправки', 'list="dl-origin"')}${inp('destination', '目的地', 'Пункт назначения', 'list="dl-dest"')}${inp('transport', '运输方式', 'Способ перевозки', 'list="dl-tr"')}</div>
   <div class="row"><div><label>发货日期 · Дата отправки</label><input type="date" name="inv_date" id="i-inv_date" value="${esc(String(v.inv_date || today).slice(0, 10))}"></div>
     ${inp('sender', '发货人', 'Грузоотправитель')}</div>
   ${parcels.length ? `<h3>${esc(t('a_pick_parcels'))}</h3><div class="tbl"><table><tr><th></th><th>${esc(t('track'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th></tr>
