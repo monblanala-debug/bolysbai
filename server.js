@@ -888,7 +888,7 @@ function importInvoiceRow(req, rec, dayDefault, bad, skipped) {
   const existing = number ? db.prepare('SELECT * FROM invoices WHERE number = ? AND client_id = ?').get(number, client.id) : null;
   if (existing && !n('pieces')) rec.pieces = existing.pieces;
   const id = saveInvoice(rec, existing);
-  if (id && rec.pay_note !== undefined) db.prepare('UPDATE invoices SET paid = ? WHERE id = ?').run(/付|оплач|paid/i.test(rec.pay_note) ? 1 : existing ? existing.paid : 0, id);
+  if (id && rec.pay_note !== undefined) db.prepare('UPDATE invoices SET paid = ? WHERE id = ?').run(/付|оплач|paid/i.test(rec.pay_note) && !/未付|не\s*оплач|unpaid/i.test(rec.pay_note) ? 1 : existing ? existing.paid : 0, id);
   return id ? 1 : 0;
 }
 
