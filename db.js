@@ -345,9 +345,16 @@ function nextClientCode() {
 }
 
 // Маркировка для склада: шаблон вроде D{code}-{last4}.
+// Коды клиентов в базе: «1600» — это D1600 (буква D не хранится), «#9455» — код из одних цифр без буквы,
+// «Y15», «X40», «AB016» — как есть. dispCode показывает код так, как его пишут люди.
+const dispCode = (code) => { const c = String(code || ''); return c.startsWith('#') ? c.slice(1) : /^\d/.test(c) ? `D${c}` : c; };
+// Из того, что написали в Excel или в форме: D1600 → 1600, 9455 → #9455, y15 → Y15.
+const codeKey = (raw) => { const c = String(raw || '').trim().toUpperCase().replace(/\s+/g, ''); return /^D\d/.test(c) ? c.slice(1) : /^\d/.test(c) ? `#${c}` : c; };
+
 function shippingMark(template, client) {
   const last4 = normPhone(client.phone).slice(-4);
-  return String(template || 'D{code}-{last4}').replace('{code}', client.code).replace('{last4}', last4);
+  const code = String(client.code || '');
+  return String(template || 'D{code}-{last4}').replace('D{code}', dispCode(code)).replace('{code}', code.replace(/^#/, '')).replace('{last4}', last4);
 }
 
 function addEvent(parcelId, status, comment = '') {
@@ -400,4 +407,4 @@ function linkOrphanParcels(clientId, code) {
   db.prepare('UPDATE parcels SET client_id = ? WHERE client_id IS NULL AND client_code = ?').run(clientId, code);
 }
 
-module.exports = { db, STATUSES, setting, normPhone, nextClientCode, shippingMark, upsertParcel, addEvent, numOrNull, linkOrphanParcels };
+module.exports = { dispCode, codeKey, db, STATUSES, setting, normPhone, nextClientCode, shippingMark, upsertParcel, addEvent, numOrNull, linkOrphanParcels };

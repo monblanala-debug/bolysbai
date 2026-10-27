@@ -3,7 +3,7 @@ const session = require('express-session');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const crypto = require('crypto');
-const { db, STATUSES, setting, normPhone, nextClientCode, shippingMark, upsertParcel, addEvent, numOrNull, linkOrphanParcels } = require('./db');
+const { db, dispCode, codeKey, STATUSES, setting, normPhone, nextClientCode, shippingMark, upsertParcel, addEvent, numOrNull, linkOrphanParcels } = require('./db');
 const { t: tr, LANGS } = require('./i18n');
 const { page, esc, heroMap, statusLine } = require('./layout');
 const { readScanFile, parseScan } = require('./scanner');
@@ -27,7 +27,6 @@ const can = (req, method, path) => { const k = `${method} ${path}`; const r = AC
 const photosOnly = (req) => ['manager', 'keeper'].includes(req.session.admin);
 const canMoney = (req) => MONEY.includes(req.session.admin);
 // Код для людей: цифровые коды пишем с D (D1600), старые буквенные (Y58, AB016) как есть.
-const dispCode = (code) => (/^\d/.test(code) ? `D${code}` : code);
 
 const app = express();
 app.set('trust proxy', 1);
@@ -432,7 +431,7 @@ app.post('/forgot', (req, res) => {
   const phone = normPhone(req.body.phone);
   const c = phone.length >= 10 && db.prepare('SELECT phone, code FROM clients WHERE phone = ?').get(phone);
   if (!c) return forgotPage(req, `<div class="alert err">${esc(t('forgot_none'))}</div>${forgotForm(t, req.body.phone)}<a href="/">${esc(t('get_code'))}</a>`);
-  const shown = /^\d+$/.test(c.code) ? `D${c.code}` : c.code;
+  const shown = dispCode(c.code);
   forgotPage(req, `<p class="muted">${esc(t('forgot_found'))}</p><div class="code">${esc(shown)}</div>
     <form method="post" action="/cabinet/login"><input type="hidden" name="phone" value="${esc(c.phone)}"><input type="hidden" name="code" value="${esc(c.code)}"><p><button>${esc(t('login_btn'))}</button></p></form>`);
 });
@@ -441,10 +440,13 @@ app.post('/cabinet/login', (req, res) => {
   const f = loginFails.get(ip);
   if (f && f.until > now && f.n >= 10) return res.redirect('/cabinet?err=many');
   // Код принимаем в любом виде: 1600, D1600, d1600, D1600-4567, Y7.
-  const code = String(req.body.code || '').trim().toUpperCase().replace(/\s+/g, '').replace(/-\d{4}$/, '').replace(/^D(?=\d)/, '');
+  const raw = String(req.body.code || '').trim().toUpperCase().replace(/\s+/g, '').replace(/-\d{4}$/, '');
+  // «1600» без буквы — это и D1600 с сайта, и код из одних цифр (#1600): пробуем оба.
+  const codes = [...new Set([codeKey(raw), /^\d/.test(raw) ? raw : null].filter(Boolean))];
   // Старые клиенты, у которых в базе нет номера (stub-…), входят по одному коду.
-  const c = db.prepare('SELECT id FROM clients WHERE phone = ? AND code = ?').get(normPhone(req.body.phone), code)
-    || db.prepare("SELECT id FROM clients WHERE code = ? AND phone LIKE 'stub-%'").get(code);
+  let c = null;
+  for (const code of codes) c ||= db.prepare('SELECT id FROM clients WHERE phone = ? AND code = ?').get(normPhone(req.body.phone), code);
+  for (const code of codes) c ||= db.prepare("SELECT id FROM clients WHERE code = ? AND phone LIKE 'stub-%'").get(code);
   if (!c) {
     loginFails.set(ip, { n: (f && f.until > now ? f.n : 0) + 1, until: now + 15 * 60 * 1000 });
     return res.redirect('/cabinet?err=1');
@@ -471,7 +473,7 @@ const INV_GOODS = [
   ['goods', '品名', 'Перечень товаров'], ['pieces', '件数', 'Количество'], ['total_weight', '重量', 'Вес'], ['volume', '体积', 'Объём'],
   ['rate', '单价', 'Цена'], ['freight', '运费 $', 'Фрахт'], ['goods_value', '货值 $', 'Стоимость товара'], ['ins_rate', '保率 (%)', 'Страховка %'],
   ['ins_fee', '保险费 $', 'Страховка $'], ['packing', '打包方式', 'Упаковка'], ['pack_fee', '包装费 $', 'Плата за упаковку'],
-  ['advance', '垫付款 $', 'Перевод на заказ'], ['unload_fee', '落地费 $', 'Плата за разгрузку'], ['other_fee', '其他款项 $', 'Другие платежи'],
+  ['advance', '垫付款 $', 'Оплачено за вас в Китае'], ['unload_fee', '落地费 $', 'Плата за разгрузку'], ['other_fee', '其他款项 $', 'Другие платежи'],
 ];
 const NUM_FIELDS = ['pieces', 'total_weight', 'volume', 'rate', 'freight', 'goods_value', 'ins_rate', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee'];
 const FEES = ['freight', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee'];
@@ -620,7 +622,7 @@ app.get('/admin/clients', (req, res) => {
   const like = `%${q}%`; const owner = isOwner(req);
   const rows = db.prepare(`SELECT c.*, ci.name city_name, (SELECT COUNT(*) FROM parcels p WHERE p.client_id = c.id) pc
     FROM clients c LEFT JOIN cities ci ON ci.id = c.city_id
-    WHERE ? = '' OR c.code LIKE ? OR c.name LIKE ? OR (? AND c.phone LIKE ?) ORDER BY c.id DESC LIMIT 300`).all(q, like, like, owner ? 1 : 0, like);
+    WHERE ? = '' OR c.code LIKE ? OR c.code = ? OR c.code = ? OR c.name LIKE ? OR (? AND c.phone LIKE ?) ORDER BY c.id DESC LIMIT 300`).all(q, like, codeKey(q), q.toUpperCase().replace(/^D(?=\d)/, ''), like, owner ? 1 : 0, like);
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   adminRender(req, res, t('a_clients'), `<div class="card"><form class="row"><div><input name="q" value="${esc(q)}" placeholder="${esc(t('code'))} / ${esc(t('name'))}${owner ? ' / ' + esc(t('phone')) : ''}"></div><button>${esc(t('search'))}</button></form></div>
   <details class="card" id="add" ${req.query.code ? 'open' : ''}><summary><b>${esc(t('a_add_client'))}</b></summary><p class="muted">${esc(t('a_add_client_hint'))}</p>
@@ -665,7 +667,7 @@ app.post('/admin/clients/import', upload.single('file'), (req, res) => {
     for (const row of rows.slice(hi + 1)) {
       const rec = {}; map.forEach((f, i) => { if (f) rec[f] = String(row[i] ?? '').trim(); });
       if (!looksCode(rec.code)) continue;
-      const code = rec.code.toUpperCase().replace('-', '').replace(/^D(?=\d)/, '');
+      const code = codeKey(rec.code.replace('-', ''));
       const phone = normPhone(rec.phone); const city = findCity(rec.city);
       const ex = db.prepare('SELECT * FROM clients WHERE code = ?').get(code);
       const taken = phone.length >= 10 ? db.prepare('SELECT id FROM clients WHERE phone = ?').get(phone) : null;
@@ -687,7 +689,7 @@ app.post('/admin/clients/import', upload.single('file'), (req, res) => {
 });
 
 app.post('/admin/clients/add', (req, res) => {
-  const code = String(req.body.code || '').trim().toUpperCase().replace(/^D(?=\d)/, '').replace(/-\d{4}$/, '');
+  const code = codeKey(String(req.body.code || '').trim().replace(/-\d{4}$/, ''));
   const phone = normPhone(req.body.phone); const name = String(req.body.name || '').trim().slice(0, 80);
   const cityId = parseInt(req.body.city_id, 10) || null;
   if (!code || !name || phone.length < 10) { req.session.flash = req.t('a_add_client_err'); return res.redirect('/admin/clients#add'); }
@@ -849,7 +851,7 @@ const INV_IMPORT_COLS = {
   ins_fee: ['страховка $', 'страховка', '保险费'],
   packing: ['упаковка', '打包方式', '包装', '包装方式'],
   pack_fee: ['плата за упаковку', 'за упаковку', '包装费', '打包费'],
-  advance: ['перевод на заказ', '垫付款'],
+  advance: ['перевод на заказ', 'оплачено за вас в китае', '垫付款', '国内垫付', '垫付'],
   unload_fee: ['плата за разгрузку', 'за разгрузку', '落地费'],
   other_fee: ['другие платежи', '其他款项'],
   origin: ['пункт вылета', 'откуда', '始发地', '发货地', '起运地'],
@@ -863,7 +865,8 @@ const INV_IMPORT_COLS = {
 };
 // Если заголовки не распознались, читаем колонки по порядку как в ежедневной таблице склада:
 // 品名, 货号, 目的地, 始发地, 重量, 体积, 密度, 单价, 打包费, -, -, -, 包装, 总计, 备注, 运踪, 付款.
-const DAILY_LAYOUT = ['goods', 'number', 'destination', 'origin', 'total_weight', 'volume', null, 'rate', 'pack_fee', null, null, null, 'packing', 'amount', 'note', 'cargo_status', 'pay_note'];
+// J 保险% · K 保险费用 · L 国内垫付 (оплатили за клиента доставку/разгрузку внутри Китая — добавляется к итогу).
+const DAILY_LAYOUT = ['goods', 'number', 'destination', 'origin', 'total_weight', 'volume', null, 'rate', 'pack_fee', 'ins_rate', 'ins_fee', 'advance', 'packing', 'amount', 'note', 'cargo_status', 'pay_note'];
 function matchInvColumn(header) {
   const parts = String(header || '').toLowerCase().replace(/\s*\$\s*/g, '').split(/[\/\n]/).map((x) => x.trim()).filter(Boolean);
   for (const [field, names] of Object.entries(INV_IMPORT_COLS)) if (parts.some((p) => names.includes(p))) return field;
@@ -883,7 +886,7 @@ function parseDay(v, fallback) {
 app.get('/admin/invoice-template.xlsx', (req, res) => {
   const head = [['code', 'Код клиента / 客户编码'], ['inv_date', 'Дата отправки / 发货日期'], ['goods', 'Перечень товаров / 品名'], ['pieces', 'Количество / 件数'],
     ['total_weight', 'Вес / 重量'], ['volume', 'Объём / 体积'], ['rate', 'Цена / 单价'], ['price_basis', 'Цена за / 计价 (м3 / кг)'], ['packing', 'Упаковка / 打包方式'],
-    ['pack_fee', 'Плата за упаковку / 包装费'], ['goods_value', 'Стоимость товара / 货值'], ['ins_rate', 'Страховка % / 保率'], ['advance', 'Перевод на заказ / 垫付款'],
+    ['pack_fee', 'Плата за упаковку / 包装费'], ['goods_value', 'Стоимость товара / 货值'], ['ins_rate', 'Страховка % / 保率'], ['advance', 'Оплачено за вас в Китае / 垫付款'],
     ['unload_fee', 'Плата за разгрузку / 落地费'], ['other_fee', 'Другие платежи / 其他款项'], ['destination', 'Пункт назначения / 目的地'], ['transport', 'Способ перевозки / 运输方式'],
     ['note', 'Замечание / 备注']];
   const ex = { code: 'D1600', inv_date: '16.10.2026', goods: '汽配 Автозапчасти', pieces: 4, total_weight: 75.2, volume: 1.183, rate: 190, price_basis: 'м3', packing: '木架 Обрешётка', pack_fee: 35, goods_value: 0, ins_rate: 0, advance: 0, unload_fee: 0, other_fee: 0, destination: '阿拉木图 Алматы', transport: '陆运 Авто', note: '' };
@@ -895,13 +898,13 @@ app.get('/admin/invoice-template.xlsx', (req, res) => {
 
 // Номер склада вида D185-0301-2 или AB016-3D-0302-2: код клиента, ММДД отправки, мест.
 const parseCargoNo = (no) => /^(.+?)-(\d{2})(\d{2})-(\d+)/.exec(String(no || '').trim());
-const DEST_RU = { 阿拉木图: 'Алматы', 比什凯克: 'Бишкек', 莫斯科: 'Москва', '19公里': '19 км (Алматы)', 莫斯科外送: 'Москва, доставка' };
+const DEST_RU = { 阿拉木图: 'Алматы', 比什凯克: 'Бишкек', 莫斯科: 'Москва', '19公里': '19 МКАД', 莫斯科外送: 'Москва, доставка' };
 // Клиент без WhatsApp, созданный из таблицы склада: телефон-заглушка «stub-код», войти в кабинет пока не может.
 const isStub = (client) => String(client.phone || '').startsWith('stub-');
 function stubClient(code, dest) {
   const cities = db.prepare('SELECT * FROM cities').all();
   const d = String(dest || '');
-  const city = cities.find((x) => d.includes(x.name) || (CITY_ZH[x.name] && d.includes(CITY_ZH[x.name]))) || (/19公里/.test(d) ? cities.find((x) => x.name === 'Алматы') : null);
+  const city = cities.find((x) => d.includes(x.name) || (CITY_ZH[x.name] && d.includes(CITY_ZH[x.name]))) || (/19公里|МКАД/i.test(d) ? cities.find((x) => x.name === 'Москва') : null);
   const r = db.prepare('INSERT INTO clients (code, name, phone, city_id, legacy) VALUES (?, ?, ?, ?, 1)').run(code, dispCode(code), `stub-${code}`, city ? city.id : null);
   linkOrphanParcels(r.lastInsertRowid, code);
   return { id: Number(r.lastInsertRowid) };
@@ -916,7 +919,7 @@ function importInvoiceRow(req, rec, dayDefault, bad, skipped) {
   let c = null;
   for (let k = parts.length; k > 0 && !c; k--) c = findClientByCode(parts.slice(0, k).join('-'));
   // Нового клиента из таблицы заводим сразу (без номера), чтобы его накладные не потерялись; номер добавят потом.
-  if (!c) { const code = parts[0].toUpperCase().replace(/^D(?=\d)/, ''); c = stubClient(code, rec.destination); bad.push(dispCode(code)); }
+  if (!c) { const code = codeKey(parts[0]); c = stubClient(code, rec.destination); bad.push(dispCode(code)); }
   const client = getClient(c.id);
   if (!rec.inv_date && cno) {
     // Год берём из даты по умолчанию; если месяц из номера ещё не наступил, это прошлый год.
@@ -1034,7 +1037,7 @@ function invoiceForm(req, client, inv) {
   <div class="row">${inp('goods', '品名', 'Перечень товаров')}${inp('pieces', '件数', 'Мест')}${inp('total_weight', '重量', 'Вес, кг')}${inp('volume', '体积', 'Объём, м³')}</div>
   <div class="row">${inp('rate', '单价', 'Цена')}<div><label>за · 按</label><select name="price_basis" id="i-price_basis"><option value="m3" ${v.price_basis !== 'kg' ? 'selected' : ''}>м³</option><option value="kg" ${v.price_basis === 'kg' ? 'selected' : ''}>кг</option></select></div>
     ${inp('freight', '运费 $', 'Фрахт')}${inp('goods_value', '货值 $', 'Стоимость товара')}${inp('ins_rate', '保率 %', 'Страховка %')}${inp('ins_fee', '保险费 $', 'Страховка $')}</div>
-  <div class="row">${inp('packing', '打包方式', 'Упаковка', 'list="dl-pack"')}${inp('pack_fee', '包装费 $', 'За упаковку')}${inp('advance', '垫付款 $', 'Перевод на заказ')}${inp('unload_fee', '落地费 $', 'За разгрузку')}${inp('other_fee', '其他款项 $', 'Другие платежи')}</div>
+  <div class="row">${inp('packing', '打包方式', 'Упаковка', 'list="dl-pack"')}${inp('pack_fee', '包装费 $', 'За упаковку')}${inp('advance', '垫付款 $', 'Оплачено за вас в Китае')}${inp('unload_fee', '落地费 $', 'За разгрузку')}${inp('other_fee', '其他款项 $', 'Другие платежи')}</div>
   <div class="row"><div><label>${esc(t('status'))}</label><select name="inv_status">${invStatusOptions(t, INV_STATUSES.includes(v.inv_status) ? v.inv_status : 'auto')}</select></div>${inp('cargo_status', '运踪', t('inv_cargo_status'), 'placeholder="3.13到"')}${inp('pay_note', '付款', t('inv_pay_note'))}</div>
   <div class="row">${inp('note', '备注', 'Замечание')}${inp('number', '货号', `${t('invoice_no')} (${t('inv_auto')})`, `placeholder="D${esc(client.code)}-MMDD-мест" ${inv ? 'data-touched="1"' : ''}`)}
     <div><label>总计 · ${esc(t('total'))}</label><div class="stat" id="i-total" style="color:var(--brand)">0</div></div></div>
@@ -1051,10 +1054,15 @@ function invoiceForm(req, client, inv) {
   f.addEventListener('input',calc);f.addEventListener('change',calc);calc();${inv ? '' : 'sum();'}})();</script>`;
 }
 
-const findClientByCode = (code) => db.prepare('SELECT id FROM clients WHERE code = ?').get(String(code || '').trim().toUpperCase().replace(/^D(?=\d)/, '').replace(/-\d{4}$/, ''));
+// В Excel код без буквы (9455) — отдельный клиент #9455. В формах админки «1600» может значить и D1600: loose пробует оба.
+const findClientByCode = (code, loose = false) => {
+  const raw = String(code || '').trim().toUpperCase().replace(/\s+/g, '').replace(/-\d{4}$/, '');
+  const q = db.prepare('SELECT id FROM clients WHERE code = ?');
+  return q.get(codeKey(raw)) || (loose && /^\d/.test(raw) ? q.get(raw) : null);
+};
 
 app.get('/admin/invoices/new', (req, res) => {
-  const c = findClientByCode(req.query.code);
+  const c = findClientByCode(req.query.code, true);
   if (!c) { req.session.flash = req.t('not_found'); return res.redirect('/admin/invoices'); }
   adminRender(req, res, req.t('a_new_invoice'), invoiceForm(req, getClient(c.id)));
 });
@@ -1241,10 +1249,10 @@ app.post('/admin/import-scan', scanUpload.single('file'), (req, res) => {
 });
 
 app.get('/admin/photos', (req, res) => {
-  const t = req.t; const q = String(req.query.q || '').trim().toUpperCase().replace(/^D(?=\d)/, '');
+  const t = req.t; const q = String(req.query.q || '').trim().toUpperCase();
   const like = `%${q}%`;
   const rows = db.prepare(`SELECT i.id, i.number, i.inv_date, i.created_at, i.pieces, i.total_weight, c.code FROM invoices i JOIN clients c ON c.id = i.client_id
-    WHERE ? = '' OR i.number LIKE ? OR c.code = ? ORDER BY i.id DESC LIMIT 60`).all(q, like, q);
+    WHERE ? = '' OR i.number LIKE ? OR c.code = ? OR c.code = ? ORDER BY i.id DESC LIMIT 60`).all(q, like, codeKey(q), q.replace(/^D(?=\d)/, ''));
   const phq = db.prepare('SELECT * FROM invoice_photos WHERE invoice_id = ? ORDER BY id'); const photos = (id) => phq.all(id);
   const back = `/admin/photos${q ? `?q=${encodeURIComponent(q)}` : ''}`;
   adminRender(req, res, t('a_scale_photos'), `${scanForm(t)}<div class="card"><p class="muted" style="margin-top:0">${esc(t('a_scale_hint'))}</p><form class="row"><div><input name="q" value="${esc(req.query.q || '')}" placeholder="${esc(t('invoice_no'))} / ${esc(t('code'))}"></div><button>${esc(t('search'))}</button></form></div>
