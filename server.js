@@ -1013,7 +1013,10 @@ function saveInvoice(b, existing) {
   for (const k of NUM_FIELDS) if (v[k] == null && !['freight', 'ins_fee'].includes(k)) v[k] = 0;
   if (v.freight == null) v.freight = Math.round(v.rate * (v.price_basis === 'kg' ? v.total_weight : v.volume) * 100) / 100;
   if (v.ins_fee == null) v.ins_fee = Math.round((v.goods_value * v.ins_rate) / 100 * 100) / 100;
-  v.amount = Math.round(FEES.reduce((s, k) => s + v[k], 0) * 100) / 100;
+  // Итог округляем до целого доллара (34.56 → 35, 34.40 → 34); разницу относим во фрахт, чтобы строки сходились с итогом.
+  const sum = FEES.reduce((s, k) => s + v[k], 0);
+  v.amount = Math.round(sum);
+  if (FEES.includes('freight')) v.freight = Math.round((v.freight + v.amount - sum) * 100) / 100;
   let number = String(b.number || '').trim().toUpperCase() || invoiceNumber(client, v.inv_date, v.pieces);
   for (let i = 2; db.prepare('SELECT id FROM invoices WHERE number = ? AND id != ?').get(number, existing ? existing.id : 0); i++) number = `${number.replace(/\/\d+$/, '')}/${i}`;
   v.number = number;
