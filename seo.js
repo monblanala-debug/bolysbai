@@ -43,24 +43,43 @@ const slug = (name) => [...String(name).toLowerCase()].map((c) => (c in TR ? TR[
 // «в Москву», «в Астану», «в Алматы».
 const toCity = (name) => String(name).replace(/а$/, 'у').replace(/я$/, 'ю');
 
+// Города для страниц «Доставка из Китая в …». Пункты выдачи из базы добавляются к ним сами.
+const COUNTRIES = [
+  ['KZ', 'Казахстан', 'Қазақстан', '哈萨克斯坦', ['Алматы', 'Астана', 'Шымкент', 'Караганда', 'Актобе', 'Тараз', 'Павлодар', 'Усть-Каменогорск', 'Семей', 'Атырау', 'Костанай', 'Кызылорда', 'Уральск', 'Петропавловск', 'Актау', 'Туркестан', 'Талдыкорган', 'Кокшетау', 'Экибастуз', 'Темиртау', 'Жезказган', 'Конаев']],
+  ['RU', 'Россия', 'Ресей', '俄罗斯', ['Москва', 'Санкт-Петербург', 'Новосибирск', 'Екатеринбург', 'Казань', 'Нижний Новгород', 'Челябинск', 'Красноярск', 'Самара', 'Уфа', 'Ростов-на-Дону', 'Омск', 'Краснодар', 'Воронеж', 'Пермь', 'Волгоград', 'Тюмень', 'Саратов', 'Иркутск', 'Барнаул', 'Владивосток', 'Хабаровск', 'Оренбург', 'Томск', 'Новокузнецк']],
+  ['KG', 'Кыргызстан', 'Қырғызстан', '吉尔吉斯斯坦', ['Бишкек', 'Ош', 'Джалал-Абад', 'Каракол']],
+];
+// Все города: { name, slug, country, pickup } — pickup берём из базы, если там есть такой город.
+function allCities(dbCities) {
+  const byName = new Map(dbCities.map((c) => [c.name, c])); const out = [];
+  for (const [cc, , , , names] of COUNTRIES) for (const name of names) out.push({ name, slug: slug(name), country: cc, db: byName.get(name) || null });
+  for (const c of dbCities) if (!out.some((x) => x.name === c.name)) out.push({ name: c.name, slug: slug(c.name), country: '', db: c });
+  return out;
+}
+const countryName = (lang, cc) => { const c = COUNTRIES.find((x) => x[0] === cc); return c ? c[lang === 'kk' ? 2 : lang === 'zh' ? 3 : 1] : ''; };
+
 // Страница «Доставка из Китая в <город>»: в меню её нет, на неё приходят из поиска.
-function cityPage(lang, city, { wa, pickup, air }) {
-  const n = city.name;
+function cityPage(lang, city, { wa, pickup, air, others = [] }) {
+  const n = city.name; const has = !!city.db; const cn = countryName(lang, city.country);
   const L = {
-    ru: { h: `Доставка из Китая в ${toCity(n)}`, sub: `Карго 151: больше 15 лет возим грузы из Китая в СНГ. Свои склады в Иу и Гуанчжоу, выдача в ${n === 'Алматы' ? 'Алматы' : 'городе ' + n}.`,
-      how: 'Как это работает', steps: ['📝 Получите код клиента — Займёт минуту, код бесплатный.', '🏷️ Подпишите заказ кодом — Продавец на 1688, Taobao или Pinduoduo отправит товар на наш склад с вашим кодом.', '🚚 Мы привезём груз — Принимаем, проверяем, упаковываем и отправляем.', `📍 Заберите в ${toCity(n)} — Статус и накладные видны в личном кабинете.`],
+    ru: { h: `Доставка из Китая в ${toCity(n)}`, sub: `Карго 151: больше 15 лет возим грузы из Китая в СНГ. Свои склады в Иу и Гуанчжоу, ${has ? `выдача в городе ${n}` : `доставка в ${toCity(n)}${cn ? ` (${cn})` : ''}`}.`,
+      how: 'Как это работает', steps: ['📝 Получите код клиента — Займёт минуту, код бесплатный.', '🏷️ Подпишите заказ кодом — Продавец на 1688, Taobao или Pinduoduo отправит товар на наш склад с вашим кодом.', '🚚 Мы привезём груз — Принимаем, проверяем, упаковываем и отправляем.', has ? `📍 Заберите в ${toCity(n)} — Статус и накладные видны в личном кабинете.` : `📍 Получите груз в ${toCity(n)} — Напишите в WhatsApp, подскажем, как удобнее получить груз в вашем городе.`],
       why: 'Почему Карго 151', rows: ['🏭 Свои склады в Китае — Иу и Гуанчжоу.', '🗣️ Говорим по-русски — Поможем с поставщиком и оплатой.', '💳 Оплатим поставщику — От физлица или юрлица, переводом или наличными, в ₸, ₽ или $.', '⭐ Отзывы клиентов — Скриншоты и видео на странице отзывов.'],
       pick: 'Пункт выдачи', airT: 'Авиадоставка', code: 'Получить код', waT: 'Написать в WhatsApp', desc: `Доставка грузов из Китая в ${toCity(n)}: свои склады в Иу и Гуанчжоу, авто и авиа, оплата поставщику. Получите код клиента Карго 151 за минуту.` },
     kk: { h: `Қытайдан ${n} қаласына жеткізу`, sub: `Карго 151: Қытайдан ТМД-ға 15 жылдан астам. Иу және Гуанчжоуда өз қоймаларымыз.`,
-      how: 'Бұл қалай жұмыс істейді', steps: ['📝 Клиент кодын алыңыз — Бір минут, тегін.', '🏷️ Тапсырысқа кодты жазыңыз — Сатушы тауарды біздің қоймаға сіздің кодыңызбен жібереді.', '🚚 Біз жеткіземіз — Қабылдаймыз, тексереміз, қаптаймыз, жібереміз.', `📍 ${n} қаласында алыңыз — Мәртебе жеке кабинетте көрінеді.`],
+      how: 'Бұл қалай жұмыс істейді', steps: ['📝 Клиент кодын алыңыз — Бір минут, тегін.', '🏷️ Тапсырысқа кодты жазыңыз — Сатушы тауарды біздің қоймаға сіздің кодыңызбен жібереді.', '🚚 Біз жеткіземіз — Қабылдаймыз, тексереміз, қаптаймыз, жібереміз.', has ? `📍 ${n} қаласында алыңыз — Мәртебе жеке кабинетте көрінеді.` : `📍 ${n} қаласында алу — WhatsApp-қа жазыңыз, қалай алуға ыңғайлы екенін айтамыз.`],
       why: 'Неге Карго 151', rows: ['🏭 Қытайда өз қоймалары — Иу және Гуанчжоу.', '🗣️ Орысша сөйлейміз — Жеткізушімен және төлеммен көмектесеміз.', '💳 Жеткізушіге төлейміз — Жеке немесе заңды тұлғадан, ₸, ₽ немесе $.', '⭐ Клиенттер пікірі — Пікірлер бетінде.'],
       pick: 'Беру пункті', airT: 'Авиа жеткізу', code: 'Код алу', waT: 'WhatsApp-қа жазу', desc: `Қытайдан ${n} қаласына жүк жеткізу: Иу және Гуанчжоуда өз қоймалары, авто және авиа. Карго 151 клиент кодын алыңыз.` },
     zh: { h: `从中国发货到 ${n}`, sub: '151 货运：15年以上中国到独联体物流经验，义乌和广州自有仓库。',
-      how: '流程', steps: ['📝 获取客户编码 — 一分钟，免费。', '🏷️ 订单标上编码 — 卖家把货发到我们仓库并写上您的编码。', '🚚 我们发货 — 收货、验货、包装、发出。', `📍 在 ${n} 提货 — 在个人账户查看状态。`],
+      how: '流程', steps: ['📝 获取客户编码 — 一分钟，免费。', '🏷️ 订单标上编码 — 卖家把货发到我们仓库并写上您的编码。', '🚚 我们发货 — 收货、验货、包装、发出。', has ? `📍 在 ${n} 提货 — 在个人账户查看状态。` : `📍 在 ${n} 收货 — WhatsApp 联系我们，告诉您最方便的取货方式。`],
       why: '为什么选择 151', rows: ['🏭 中国自有仓库 — 义乌和广州。', '🗣️ 会说俄语 — 帮您联系供应商和付款。', '💳 代付供应商 — 个人或公司，₸ ₽ $。', '⭐ 客户评价 — 见评价页面。'],
       pick: '提货点', airT: '空运', code: '获取编码', waT: 'WhatsApp 咨询', desc: `从中国发货到 ${n}：义乌和广州自有仓库，陆运和空运，代付供应商。` },
   }; const l = L[lang] || L.ru;
   const row = (x) => { const m = /^(\S+)\s+(.+?) — (.+)$/.exec(x); return m ? `<div class="dk-row"><span class="i">${m[1]}</span><div><b>${esc(m[2])}</b><p>${esc(m[3])}</p></div></div>` : ''; };
+  const extra = { KZ: { ru: '📦 Фулфилмент для Kaspi — Партнёр в Казахстане примет товар и отправит на Kaspi.', kk: '📦 Kaspi үшін фулфилмент — Қазақстандағы серіктес тауарды Kaspi-ге жібереді.', zh: '📦 Kaspi 履约 — 哈萨克斯坦合作伙伴收货并发往 Kaspi。' },
+    RU: { ru: '💵 Оплата в рублях — Переводом или наличными в Москве.', kk: '💵 Рубльмен төлем — Аударым немесе Мәскеуде қолма-қол.', zh: '💵 卢布付款 — 转账或在莫斯科付现金。' } }[city.country];
+  if (extra) l.rows = [...l.rows.slice(0, 3), extra[lang] || extra.ru, l.rows[3]];
+  const oth = { ru: 'Доставка в другие города', kk: 'Басқа қалаларға жеткізу', zh: '其他城市' }[lang] || 'Доставка в другие города';
   const body = `<div class="narrow dk"><div class="dk-hero"><h1>${esc(l.h)}</h1><p>${esc(l.sub)}</p>
     <p style="margin-top:14px;opacity:1"><a class="btn" href="/">${esc(l.code)} →</a></p></div>
     <h2 class="dk-h">${esc(l.how)}</h2>${l.steps.map(row).join('')}
@@ -68,8 +87,19 @@ function cityPage(lang, city, { wa, pickup, air }) {
     ${pickup ? `<h2 class="dk-h">📍 ${esc(l.pick)}</h2><p class="dk-p">${esc(pickup)}</p>` : ''}
     <h2 class="dk-h">${esc(l.why)}</h2>${l.rows.map(row).join('')}
     <p style="margin-top:14px"><a class="btn" style="display:block;text-align:center" href="/">${esc(l.code)}</a></p>
+    ${others.length ? `<h2 class="dk-h">🗺️ ${esc(oth)}</h2><div class="promo-chips city-chips">${others.map((c) => `<a href="/dostavka/${c.slug}">${esc(c.name)}</a>`).join('')}<a href="/dostavka">${esc({ ru: 'Все города', kk: 'Барлық қалалар', zh: '全部城市' }[lang] || 'Все города')} →</a></div>` : ''}
     ${wa ? `<p><a class="btn sec" style="display:block;text-align:center" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener">💬 ${esc(l.waT)}</a></p>` : ''}</div>`;
   return { title: `${l.h} | Карго 151`, desc: l.desc, body, h: l.h };
+}
+
+// Страница со всеми городами по странам.
+function hubPage(lang, cities) {
+  const L = { ru: ['Доставка из Китая по СНГ', 'Казахстан, Россия и Кыргызстан. Выберите свой город.'], kk: ['Қытайдан ТМД бойынша жеткізу', 'Қазақстан, Ресей және Қырғызстан. Қалаңызды таңдаңыз.'], zh: ['从中国发货到独联体', '哈萨克斯坦、俄罗斯和吉尔吉斯斯坦，选择您的城市。'] }[lang] || [];
+  const groups = [...COUNTRIES.map((c) => c[0]), ''].map((cc) => [cc, cities.filter((c) => c.country === cc)]).filter(([, list]) => list.length);
+  const body = `<div class="narrow dk"><div class="dk-hero"><h1>${esc(L[0])}</h1><p>${esc(L[1])}</p></div>
+    ${groups.map(([cc, list]) => `<h2 class="dk-h">${esc(countryName(lang, cc) || '📍')}</h2><div class="promo-chips city-chips">${list.map((c) => `<a href="/dostavka/${c.slug}">${c.db ? '📍 ' : ''}${esc(c.name)}</a>`).join('')}</div>`).join('')}
+    <p style="margin-top:16px"><a class="btn" style="display:block;text-align:center" href="/">${esc({ ru: 'Получить код', kk: 'Код алу', zh: '获取编码' }[lang] || 'Получить код')}</a></p></div>`;
+  return { title: `${L[0]} | Карго 151`, desc: `${L[0]}: ${cities.slice(0, 12).map((c) => c.name).join(', ')} и другие города. Карго 151 — свои склады в Иу и Гуанчжоу.`, body, h: L[0] };
 }
 
 // Карточка компании для Google и Яндекса.
@@ -87,4 +117,4 @@ function sitemap(origin, cityPaths) {
 }
 const robots = (origin) => `User-agent: *\nDisallow: /admin\nDisallow: /cabinet\nDisallow: /invoice\nDisallow: /address\nDisallow: /code\nDisallow: /forgot\nDisallow: /logout\nDisallow: /lang/\nDisallow: /photo/\n\nSitemap: ${origin}/sitemap.xml\n`;
 
-module.exports = { pageMeta, NOINDEX, INDEXABLE, slug, cityPage, orgJson, sitemap, robots };
+module.exports = { pageMeta, NOINDEX, INDEXABLE, slug, cityPage, hubPage, allCities, orgJson, sitemap, robots };

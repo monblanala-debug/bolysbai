@@ -106,7 +106,6 @@ app.use((req, res, next) => {
       seo: { origin: `${req.protocol}://${req.get('host')}`, noindex, title: meta.title || (pm && pm[0]), desc: meta.desc || (pm && pm[1]),
         // Коды подтверждения Google и Яндекса: можно вставить весь тег, берём только content.
         verify: [['google-site-verification', setting('seo_google')], ['yandex-verification', setting('seo_yandex')]].map(([n, v]) => [n, (/content=["']([^"']+)/.exec(v || '') || [, v || ''])[1].trim()]).filter(([, v]) => v),
-        cities: path.startsWith('/admin') ? [] : db.prepare('SELECT name FROM cities ORDER BY id').all().map((c) => [c.name, SEO.slug(c.name)]),
         alt: !noindex && (SEO.INDEXABLE.includes(path) || path.startsWith('/dostavka/')), jsonld: path === '/' || path === '/about' ? SEO.orgJson(`${req.protocol}://${req.get('host')}`, String(wa || '').replace(/\D/g, '')) : '' } }));
   };
   next();
@@ -250,18 +249,22 @@ const lightbox = () => `<div class="rv-box" hidden><button class="rv-x" aria-lab
     b.onclick=(e)=>{if(e.target===b)hide()};document.onkeydown=(e)=>{if(b.hidden)return;if(e.key==='Escape')hide();if(e.key==='ArrowLeft')show(i-1);if(e.key==='ArrowRight')show(i+1)};
     b.ontouchstart=(e)=>{x=e.touches[0].clientX};b.ontouchend=(e)=>{const d=e.changedTouches[0].clientX-x;if(Math.abs(d)>50)show(i+(d<0?1:-1))}})()</script>`;
 // Страницы городов строим из списка городов выдачи: /dostavka/almaty и т.д.
-const cityBySlug = (sl) => db.prepare('SELECT * FROM cities ORDER BY id').all().find((c) => SEO.slug(c.name) === sl);
+const seoCities = () => SEO.allCities(db.prepare('SELECT * FROM cities ORDER BY id').all());
+app.get('/dostavka', (req, res) => { const p = SEO.hubPage(req.lang, seoCities()); res.render(p.h, p.body, { title: p.title, desc: p.desc }); });
 const AIR = { 'Алматы': 'Алматы — 3–5 дней.', 'Москва': 'Москва — 3–8 дней, быстрое и обычное авиа.' };
 app.get('/dostavka/:slug', (req, res) => {
-  const c = cityBySlug(String(req.params.slug));
+  const all = seoCities(); const c = all.find((x) => x.slug === String(req.params.slug));
   if (!c) return res.status(404).render('404', '<div class="narrow card"><h1>404</h1><p><a href="/">← Карго 151</a></p></div>');
-  const pickup = /заполните/i.test(c.pickup_address || '') ? '' : c.pickup_address;
-  const p = SEO.cityPage(req.lang, c, { wa: String(setting('whatsapp') || '').replace(/\D/g, ''), pickup, air: req.lang === 'ru' ? AIR[c.name] : '' });
+  const pickup = !c.db || /заполните/i.test(c.db.pickup_address || '') ? '' : c.db.pickup_address;
+  // Ссылки на соседние города той же страны — по 8 следующих по списку.
+  const same = all.filter((x) => x.country === c.country && x !== c); const i = all.indexOf(c);
+  const others = [...same.filter((x) => all.indexOf(x) > i), ...same.filter((x) => all.indexOf(x) < i)].slice(0, 8);
+  const p = SEO.cityPage(req.lang, c, { wa: String(setting('whatsapp') || '').replace(/\D/g, ''), pickup, air: req.lang === 'ru' ? AIR[c.name] : '', others });
   res.render(p.h, p.body, { title: p.title, desc: p.desc });
 });
 app.get('/robots.txt', (req, res) => res.type('text/plain').send(SEO.robots(`${req.protocol}://${req.get('host')}`)));
 app.get('/sitemap.xml', (req, res) => res.type('application/xml').send(SEO.sitemap(`${req.protocol}://${req.get('host')}`,
-  db.prepare('SELECT name FROM cities ORDER BY id').all().map((c) => `/dostavka/${SEO.slug(c.name)}`))));
+  ['/dostavka', ...seoCities().map((c) => `/dostavka/${c.slug}`)])));
 
 app.get('/reviews', (req, res) => {
   const t = req.t; const wa = setting('whatsapp'); const files = reviewFiles(); const videos = videoFiles();
