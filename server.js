@@ -262,7 +262,7 @@ function invTimeline(t, i) {
   const start = almatyDay(invStart(i));
   const day = (n) => fmtDay(new Date((start + n) * 86400e3).toISOString().slice(0, 10));
   const when = (d, n) => (d !== undefined && n <= cur ? day(d) : '');
-  return `<ol class="tl">${INV_STAGES.map(([k, d], n) => `<li class="${n < cur ? 'done' : n === cur ? 'on' : ''}"><b>${esc(t('ist_' + k))}${k === 'arrived' && i.destination ? ` · ${esc(i.destination)}` : ''}</b>${when(d, n) ? `<div class="muted" style="font-size:13px">${esc(when(d, n))}</div>` : ''}${k === 'arrived' && n === cur ? `<div class="alert info" style="margin:6px 0 0">${esc(t('pickup_wait'))}</div>` : ''}</li>`).join('')}</ol>`;
+  return `<ol class="tl">${INV_STAGES.map(([k, d], n) => `<li class="${n < cur ? 'done' : n === cur ? 'on' : ''}"><b>${esc(t('ist_' + k))}${k === 'arrived' && i.destination ? ` · ${esc(destName(i.destination))}` : ''}</b>${when(d, n) ? `<div class="muted" style="font-size:13px">${esc(when(d, n))}</div>` : ''}${k === 'arrived' && n === cur ? `<div class="alert info" style="margin:6px 0 0">${esc(t('pickup_wait'))}</div>` : ''}</li>`).join('')}</ol>`;
 }
 // Номер накладной без учёта регистра и пробелов: d1601-1030-4 → D1601-1030-4.
 const findInvoice = (no) => db.prepare('SELECT * FROM invoices WHERE number = ?').get(String(no || '').trim().toUpperCase().replace(/\s+/g, ''));
@@ -271,25 +271,28 @@ app.get('/track', (req, res) => {
   const t = req.t;
   const tracks = String(req.query.q || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean).slice(0, 50);
   let results = '';
-  const card = (i) => `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(i.number)}</b><div style="flex:0 0 auto">${invBadge(t, i)}</div></div>
+  const card = (i, top) => `<div class="card parcel"><div class="row" style="align-items:center"><b style="font-size:18px">${esc(i.number)}</b><div style="flex:0 0 auto">${invBadge(t, i)}</div></div>
         ${invTimeline(t, i)}
-        <div class="muted">${esc(t('inv_sent'))}: ${esc(fmtDay(i.inv_date || i.created_at))}${i.origin || i.destination ? ` · ${esc(i.origin)} → ${esc(i.destination)}` : ''}</div>
+        <div class="muted">${esc(t('inv_sent'))}: ${esc(fmtDay(i.inv_date || i.created_at))}${i.origin || i.destination ? ` · ${esc(i.origin)} → ${esc(destName(i.destination))}` : ''}</div>
         <div class="muted">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}</div>
         ${(() => { const ph = invoicePhotos(i.id); return ph.length ? `<div class="thumbs" style="margin-top:8px">${ph.map((f) => `<a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a>`).join('')}</div>` : ''; })()}
+        ${isMsk(i.destination) && top !== 'msk' ? `<p class="muted" style="font-size:14px;margin:6px 0 0">${esc(t('track_eta_msk'))}</p>` : ''}
         <p style="margin:10px 0 0"><a class="btn sec sm" href="/invoice/${i.id}">${esc(t('inv_view'))}</a></p></div>`;
   const client = req.session.clientId && getClient(req.session.clientId);
   if (tracks.length) {
-    results = `<div class="fade"><div class="alert info">${esc(t('track_eta'))}</div>${tracks.map((no) => {
-      const i = findInvoice(no);
-      return i ? card(i) : `<div class="card"><b>${esc(no)}</b><p class="muted" style="margin:4px 0 0">${esc(t('track_none'))}</p></div>`;
+    const found = tracks.map(findInvoice);
+    const eta = etaFor(t, found.filter(Boolean)); const top = eta === t('track_eta_msk') ? 'msk' : '';
+    results = `<div class="fade"><div class="alert info">${esc(eta)}</div>${tracks.map((no, n) => {
+      const i = found[n];
+      return i ? card(i, top) : `<div class="card"><b>${esc(no)}</b><p class="muted" style="margin:4px 0 0">${esc(t('track_none'))}</p></div>`;
     }).join('')}</div>`;
   } else if (client) {
     // Клиент вошёл — сразу показываем его грузы: сначала те, что ещё в пути, потом последние выданные.
     const all = db.prepare('SELECT * FROM invoices WHERE client_id = ? ORDER BY id DESC LIMIT 100').all(client.id);
     const live = all.filter((i) => invStage(i) !== 'delivered');
     const list = live.length ? live : all.slice(0, 5);
-    results = `<div class="fade"><h2>${esc(t('track_mine'))} · ${esc(dispCode(client.code))}</h2><div class="alert info">${esc(t('track_eta'))}</div>
-      ${list.length ? list.map(card).join('') : `<div class="card"><p class="muted" style="margin:0">${esc(t('track_mine_none'))}</p></div>`}${myParcels(req, client, '/track')}</div>`;
+    results = `<div class="fade"><h2>${esc(t('track_mine'))} · ${esc(dispCode(client.code))}</h2><div class="alert info">${esc(etaFor(t, list, client.city_name))}</div>
+      ${list.length ? list.map((i) => card(i, etaFor(t, list, client.city_name) === t('track_eta_msk') ? 'msk' : '')).join('') : `<div class="card"><p class="muted" style="margin:0">${esc(t('track_mine_none'))}</p></div>`}${myParcels(req, client, '/track')}</div>`;
   }
   res.render(t('track_title'), `${client && !tracks.length ? results : ''}<div class="card"><h1>${esc(t('track_title'))}</h1>
     <form method="get"><textarea name="q" placeholder="${esc(t('track_placeholder'))}">${esc(tracks.join('\n'))}</textarea>
@@ -478,9 +481,15 @@ const INV_GOODS = [
 const NUM_FIELDS = ['pieces', 'total_weight', 'volume', 'rate', 'freight', 'goods_value', 'ins_rate', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee'];
 const FEES = ['freight', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee'];
 
+// 19公里 — рынок «Южные ворота» на 19 км МКАД; старые накладные хранят «19 МКАД».
+const destName = (d) => String(d || '').replace(/19\s*МКАД/i, 'Москва, Южные ворота');
+// В Москву везут дольше — свой средний срок.
+const isMsk = (d) => /москв|мәскеу|莫斯科|19公里/i.test(destName(d));
+const etaFor = (t, invs, city) => t((invs.length ? invs.every((i) => isMsk(i.destination)) : isMsk(city)) ? 'track_eta_msk' : 'track_eta');
 function invoiceValue(inv, k) {
+  if (k === 'destination') return destName(inv.destination);
   if (k === 'inv_date') return fmtDay(inv.inv_date || inv.created_at);
-  if (k === 'rate') return inv.rate ? `${num(inv.rate)} $/${inv.price_basis === 'kg' ? 'кг' : 'м³'}` : '0';
+  if (k === 'rate') return inv.rate ? `${num(inv.rate)} $\u2060/\u2060${inv.price_basis === 'kg' ? 'кг' : 'м³'}` : '0';
   if (k === 'ins_rate') return `${num(inv.ins_rate)}%`;
   return NUM_FIELDS.includes(k) ? num(inv[k]) : inv[k] || '';
 }
@@ -515,7 +524,7 @@ function invoicePage(req, inv) {
   ${photos.length || req.session.admin ? `<div class="card"><h2 style="margin-top:0">${esc(t('inv_photos'))}</h2>
     ${photos.length ? `<div class="photos">${photos.map((f) => `<div style="position:relative"><a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a>${req.session.admin ? `<form method="post" action="/admin/invoices/${inv.id}/photos/${f.id}/delete" class="noprint" style="position:absolute;top:4px;right:4px;margin:0" onsubmit="return confirm('${esc(t('confirm_delete_photo'))}')"><button class="sec sm" style="padding:2px 8px">✕</button></form>` : ''}</div>`).join('')}</div>` : `<p class="muted">${esc(t('inv_no_photos'))}</p>`}
     ${req.session.admin ? photoForm(t, inv.id, `/admin/invoices/${inv.id}`) + PHOTO_JS : ''}</div>` : ''}
-  <div class="card noprint"><div class="row" style="align-items:center"><h2 style="margin:0">${esc(t('status'))}</h2><div style="flex:0 0 auto">${invBadge(t, inv)}</div></div>${invTimeline(t, inv)}<p class="muted" style="font-size:14px;margin:0">${esc(t('track_eta'))}</p></div>
+  <div class="card noprint"><div class="row" style="align-items:center"><h2 style="margin:0">${esc(t('status'))}</h2><div style="flex:0 0 auto">${invBadge(t, inv)}</div></div>${invTimeline(t, inv)}<p class="muted" style="font-size:14px;margin:0">${esc(etaFor(t, [inv]))}</p></div>
   ${forwardCard(req, inv)}
   <div class="wb wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
       ${rules.map((l, i) => (i === 0 && !/^\d/.test(l) ? `<p><b>${esc(l)}</b></p>` : `<p>${esc(l)}</p>`)).join('')}</div>
@@ -898,7 +907,7 @@ app.get('/admin/invoice-template.xlsx', (req, res) => {
 
 // Номер склада вида D185-0301-2 или AB016-3D-0302-2: код клиента, ММДД отправки, мест.
 const parseCargoNo = (no) => /^(.+?)-(\d{2})(\d{2})-(\d+)/.exec(String(no || '').trim());
-const DEST_RU = { 阿拉木图: 'Алматы', 比什凯克: 'Бишкек', 莫斯科: 'Москва', '19公里': '19 МКАД', 莫斯科外送: 'Москва, доставка' };
+const DEST_RU = { 阿拉木图: 'Алматы', 比什凯克: 'Бишкек', 莫斯科: 'Москва', '19公里': 'Москва, Южные ворота', 莫斯科外送: 'Москва, доставка' };
 // Клиент без WhatsApp, созданный из таблицы склада: телефон-заглушка «stub-код», войти в кабинет пока не может.
 const isStub = (client) => String(client.phone || '').startsWith('stub-');
 function stubClient(code, dest) {

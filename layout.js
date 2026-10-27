@@ -85,7 +85,7 @@ body{padding-bottom:72px}
 .wb-top .co{font-size:26px;font-weight:700;letter-spacing:.04em}.wb-top .ti{font-size:26px;font-weight:800;margin-top:2px}
 .wb .g{display:grid;border-bottom:1.5px solid #333}.wb .head{grid-template-columns:repeat(3,1fr)}.wb .goods{grid-template-columns:1.7fr repeat(8,1fr) 1.6fr repeat(4,1fr)}.wb .sum{grid-template-columns:2fr 1fr}
 .wb .c{display:flex;flex-direction:column;border-right:1px solid #999;border-bottom:1px solid #999;min-width:0}
-.wb .l{background:#bfe3f7;font-size:13px;line-height:1.25;text-align:center;padding:4px 2px;color:#223}.wb .goods .l{background:#fde68a;font-size:12px;min-height:50px}.wb .sum .l{background:#fff200}
+.wb .l{background:#bfe3f7;font-size:13px;line-height:1.25;text-align:center;padding:4px 2px;color:#223}.wb .goods .l{background:#fde68a;font-size:11.5px;letter-spacing:-.2px;padding:4px 1px;min-height:50px;display:flex;flex-direction:column;justify-content:center;min-width:0;overflow:hidden;overflow-wrap:anywhere}.wb .goods{grid-template-rows:auto auto}.wb .goods .c{display:grid;grid-row:span 2;grid-template-rows:subgrid}.wb .sum .l{background:#fff200}
 .wb .v{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px 4px;font-weight:700;font-size:17px;overflow-wrap:anywhere}.wb .goods .v{font-size:16px}.wb .v.big{color:#e5262d;font-size:28px}
 .wb-tracks{padding:8px 12px;font-size:14px;border-bottom:1px solid #999;overflow-wrap:anywhere}
 .wb-rules{padding:8px 12px;font-size:12.5px;line-height:1.45}.wb-rules .rh{text-align:center;font-size:15px;margin-bottom:6px}.wb-rules p{margin:0 0 3px}
