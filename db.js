@@ -127,6 +127,9 @@ for (const [table, col, def] of [
   ['parcels', 'photo_token', 'TEXT'],
   ['parcels', 'wa_sent_at', 'TEXT'],
   ['parcels', 'warehouse_id', 'INTEGER'],
+  // Фото из файла сканера: хэш, чтобы повторная загрузка не дублировала; время скана на складе.
+  ['parcel_photos', 'hash', 'TEXT'],
+  ['parcels', 'scanned_at', 'TEXT'],
   ['invoices', 'pieces', 'INTEGER DEFAULT 0'],
   ...['volume', 'freight', 'goods_value', 'ins_rate', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee']
     .map((c) => ['invoices', c, 'REAL DEFAULT 0']),

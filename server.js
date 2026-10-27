@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { db, STATUSES, setting, normPhone, nextClientCode, shippingMark, upsertParcel, addEvent, numOrNull, linkOrphanParcels } = require('./db');
 const { t: tr, LANGS } = require('./i18n');
 const { page, esc, heroMap, statusLine } = require('./layout');
+const { readScanFile, parseScan } = require('./scanner');
 
 // Владелец входит логином admin и паролем из /etc/cargo151.env — так доступ не потеряется никогда.
 // Остальным сотрудникам владелец сам заводит логин и пароль в «Настройках» → «Сотрудники».
@@ -19,7 +20,8 @@ const isOwner = (req) => req.session.admin === 'owner';
 const ALL = ROLES; const MONEY = ['owner', 'accountant']; const OWNER = ['owner'];
 const ACL = [
   [/^(GET|POST) \/(settings|backup)/, OWNER], [/^POST \/clients\/(import|add)$/, OWNER], [/^POST \/invoices\/\d+\/delete$/, OWNER],
-  [/^GET \/photos$/, ALL], [/^POST \/invoices\/\d+\/photos(\/\d+\/delete)?$/, ALL],
+  [/^GET \/photos$/, ALL],
+  [/^POST \/import-scan$/, ALL], [/^POST \/invoices\/\d+\/photos(\/\d+\/delete)?$/, ALL],
 ];
 const can = (req, method, path) => { const k = `${method} ${path}`; const r = ACL.find(([re]) => re.test(k)); return (r ? r[1] : MONEY).includes(req.session.admin); };
 const photosOnly = (req) => ['manager', 'keeper'].includes(req.session.admin);
@@ -34,6 +36,8 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const fs = require('fs');
 const PHOTO_DIR = process.env.PHOTO_DIR || require('path').join(require('path').dirname(process.env.DB_PATH || require('path').join(__dirname, 'cargo151.db')), 'photos');
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
+// Файл сканера с фото в ячейках бывает большим.
+const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 app.use(express.static(require('path').join(__dirname, 'public'), { maxAge: '7d' }));
 app.use(express.urlencoded({ extended: true }));
@@ -297,7 +301,7 @@ const photoGrid = (photos) => `<div class="photos">${photos.map((f) => `<a href=
 
 app.get('/photo/:file', (req, res) => {
   const f = String(req.params.file);
-  if (!/^[a-f0-9-]{36}\.jpg$/.test(f) || !db.prepare('SELECT 1 FROM invoice_photos WHERE file = ?').get(f)) return res.sendStatus(404);
+  if (!/^[a-f0-9-]{36}\.(jpg|png)$/.test(f) || !(db.prepare('SELECT 1 FROM invoice_photos WHERE file = ?').get(f) || db.prepare('SELECT 1 FROM parcel_photos WHERE file = ?').get(f))) return res.sendStatus(404);
   res.sendFile(require('path').join(PHOTO_DIR, f), { maxAge: '30d' });
 });
 
@@ -333,6 +337,46 @@ function invoicesTable(t, invoices, base, withPaid = true, canDelete = false) {
   <script>document.getElementById('inv-all').addEventListener('change',(e)=>document.querySelectorAll('input[form=bulkinv][name=ids]').forEach((c)=>c.checked=e.target.checked))</script>${PHOTO_JS}`;
 }
 
+// Мои трек-номера: клиент добавляет треки заранее; когда склад отсканирует коробку, тут появятся фото и «Принят на складе».
+const normTrack = (x) => String(x || '').trim().toUpperCase().replace(/\s+/g, '');
+function myParcels(req, client) {
+  const t = req.t;
+  const list = db.prepare('SELECT * FROM parcels WHERE client_id = ? ORDER BY (status = \'expected\'), COALESCE(scanned_at, updated_at) DESC LIMIT 200').all(client.id);
+  const ph = db.prepare('SELECT file FROM parcel_photos WHERE parcel_id = ? ORDER BY id');
+  const rows = list.map((p) => { const f = ph.all(p.id); return `<div class="parcel" style="border-top:1px solid var(--line);padding:10px 0">
+    <div class="row" style="align-items:center"><b>${esc(p.track)}</b><div style="flex:0 0 auto">${statusBadge(t, p.status)}</div></div>
+    <div class="muted" style="font-size:14px">${p.status === 'expected' ? esc(t('trk_wait')) : `${esc(t('trk_received'))}${p.scanned_at ? ': ' + esc(fmtDay(p.scanned_at)) : ''}${p.places ? ` · ${p.places} ${esc(t('places').toLowerCase())}` : ''}`}</div>
+    ${f.length ? `<div class="thumbs" style="margin-top:6px">${f.map((x) => `<a href="/photo/${esc(x.file)}" target="_blank"><img src="/photo/${esc(x.file)}" loading="lazy" alt=""></a>`).join('')}</div>` : ''}
+    ${p.status === 'expected' ? `<form method="post" action="/cabinet/tracks/${p.id}/delete" style="margin:6px 0 0"><button class="sec sm">${esc(t('trk_remove'))}</button></form>` : ''}</div>`; }).join('');
+  const msg = req.session.trkMsg; delete req.session.trkMsg;
+  return `<div class="card" id="tracks"><h2>${esc(t('trk_title'))}</h2><p class="muted">${esc(t('trk_hint'))}</p>
+    ${msg ? `<div class="alert info">${esc(msg)}</div>` : ''}
+    <form method="post" action="/cabinet/tracks"><textarea name="tracks" required placeholder="KY4001168305249&#10;YT1234567890"></textarea><p><button>${esc(t('trk_add'))}</button></p></form>
+    ${rows || `<p class="muted">${esc(t('trk_none'))}</p>`}</div>`;
+}
+app.post('/cabinet/tracks', (req, res) => {
+  const client = req.session.clientId && getClient(req.session.clientId);
+  if (!client) return res.redirect('/cabinet');
+  const tracks = [...new Set(String(req.body.tracks || '').split(/[\s,;]+/).map(normTrack).filter((x) => /^[A-Z0-9-]{6,40}$/.test(x)))].slice(0, 100);
+  let added = 0; const taken = [];
+  for (const tr of tracks) {
+    const p = db.prepare("SELECT * FROM parcels WHERE upper(replace(track, ' ', '')) = ?").get(tr);
+    if (!p) { const id = db.prepare("INSERT INTO parcels (track, client_id, client_code, status) VALUES (?, ?, ?, 'expected')").run(tr, client.id, client.code).lastInsertRowid; addEvent(id, 'expected'); added++; }
+    else if (!p.client_id) { db.prepare("UPDATE parcels SET client_id = ?, client_code = ?, updated_at = datetime('now') WHERE id = ?").run(client.id, client.code, p.id); added++; }
+    else if (p.client_id === client.id) added++;
+    else taken.push(tr);
+  }
+  req.session.trkMsg = `${req.t('trk_added')}: ${added}${taken.length ? `. ${req.t('trk_taken')}: ${taken.join(', ')}` : ''}`;
+  res.redirect('/cabinet#tracks');
+});
+app.post('/cabinet/tracks/:id/delete', (req, res) => {
+  if (req.session.clientId) {
+    const p = db.prepare("SELECT id FROM parcels WHERE id = ? AND client_id = ? AND status = 'expected'").get(parseInt(req.params.id, 10), req.session.clientId);
+    if (p) { db.prepare('DELETE FROM parcel_events WHERE parcel_id = ?').run(p.id); db.prepare('DELETE FROM parcels WHERE id = ?').run(p.id); }
+  }
+  res.redirect('/cabinet#tracks');
+});
+
 app.get('/cabinet', (req, res) => {
   const t = req.t;
   const client = req.session.clientId && getClient(req.session.clientId);
@@ -351,6 +395,7 @@ app.get('/cabinet', (req, res) => {
     <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
     <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>${newsBlock(req)}${promo(req)}
     <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoicesTable(t, invoices, '/invoice/')}</div>
+    ${myParcels(req, client)}
 `);
 });
 
@@ -723,6 +768,7 @@ app.get('/admin/import', (req, res) => {
     <div><label>${esc(t('a_inv_default_date'))}</label><input type="date" name="inv_date" value="${new Date().toISOString().slice(0, 10)}"></div>
     <div><label>始发地 · Пункт вылета</label><select name="origin">${activeWarehouses().map((x) => `<option>${esc(`${x.name_zh}/${x.name_ru}`)}</option>`).join('')}</select></div></div>
     <p class="muted" style="font-size:14px">${esc(t('a_inv_import_hint'))} <a href="/admin/invoice-template.xlsx">${esc(t('a_template'))}</a></p></details></form></div>
+    ${scanForm(t)}
     <details class="card"><summary class="muted">${esc(t('a_parcels_import'))}</summary><p class="muted">${esc(t('a_import_hint'))}</p>
     <form method="post" action="/admin/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div>
     <div><label>${esc(t('status'))}</label><select name="default_status">${statusOptions(t, 'china')}</select></div><button>${esc(t('a_upload'))}</button></form>
@@ -1126,6 +1172,55 @@ app.post('/admin/invoices/:id/paid', (req, res) => {
   res.redirect(`/admin/invoices/${parseInt(req.params.id, 10)}`);
 });
 // ---------- Фото с весов (кладовщик) ----------
+// ---------- Файл сканера склада: трек-код + фото коробки ----------
+// Трек есть у клиента (он сам добавил в кабинете) — клиент сразу видит фото и «Принят на складе». Нет — посылка
+// просто ждёт в базе без клиента; когда клиент добавит этот трек, фото появятся у него.
+const scanForm = (t) => `<div class="card"><h2>${esc(t('a_scan_title'))}</h2><p class="muted">${esc(t('a_scan_hint'))}</p>
+  <form method="post" action="/admin/import-scan" enctype="multipart/form-data"><input type="file" name="file" accept=".xlsx" required style="margin-bottom:12px"><button class="wide">${esc(t('a_upload'))}</button></form></div>`;
+app.post('/admin/import-scan', scanUpload.single('file'), (req, res) => {
+  const back = photosOnly(req) ? '/admin/photos' : '/admin/import';
+  if (!req.file) return res.redirect(back);
+  let rows = [];
+  try { rows = readScanFile(req.file.buffer); } catch { rows = []; }
+  const crypto = require('crypto');
+  const tracks = new Map();
+  for (const r of rows) {
+    const s = parseScan(r.content);
+    if (!/^[A-Z0-9]{6,}$/.test(s.track)) continue;
+    const x = tracks.get(s.track) || { total: null, boxes: new Set(), time: r.time, images: [] };
+    if (s.total) x.total = Math.max(x.total || 0, s.total);
+    if (s.box) x.boxes.add(s.box);
+    x.images.push(...r.images);
+    tracks.set(s.track, x);
+  }
+  let matched = 0; let waiting = 0; let photos = 0;
+  for (const [track, x] of tracks) {
+    let p = db.prepare('SELECT * FROM parcels WHERE upper(replace(track, \' \', \'\')) = ?').get(track);
+    const places = x.total || x.boxes.size || 1;
+    if (!p) {
+      const id = db.prepare("INSERT INTO parcels (track, places, status) VALUES (?, ?, 'china')").run(track, places).lastInsertRowid;
+      addEvent(id, 'china');
+      p = db.prepare('SELECT * FROM parcels WHERE id = ?').get(id);
+    } else {
+      if (p.status === 'expected') { db.prepare("UPDATE parcels SET status = 'china' WHERE id = ?").run(p.id); addEvent(p.id, 'china'); }
+      db.prepare("UPDATE parcels SET places = ?, updated_at = datetime('now') WHERE id = ?").run(Math.max(places, p.places || 0), p.id);
+    }
+    const when = x.time instanceof Date ? x.time.toISOString().slice(0, 19).replace('T', ' ') : String(x.time || '').slice(0, 19);
+    if (when) db.prepare('UPDATE parcels SET scanned_at = COALESCE(scanned_at, ?) WHERE id = ?').run(when, p.id);
+    for (const img of x.images) {
+      const hash = crypto.createHash('sha1').update(img.data).digest('hex');
+      if (db.prepare('SELECT 1 FROM parcel_photos WHERE parcel_id = ? AND hash = ?').get(p.id, hash)) continue;
+      const name = `${crypto.randomUUID()}.${img.ext}`;
+      fs.writeFileSync(require('path').join(PHOTO_DIR, name), img.data);
+      db.prepare('INSERT INTO parcel_photos (parcel_id, file, hash) VALUES (?, ?, ?)').run(p.id, name, hash);
+      photos++;
+    }
+    if (p.client_id) matched++; else waiting++;
+  }
+  req.session.flash = `${req.t('a_scan_done')}: ${tracks.size}. ${req.t('a_scan_matched')}: ${matched}. ${req.t('a_scan_waiting')}: ${waiting}. ${req.t('a_scan_photos')}: ${photos}.`;
+  res.redirect(back);
+});
+
 app.get('/admin/photos', (req, res) => {
   const t = req.t; const q = String(req.query.q || '').trim().toUpperCase().replace(/^D(?=\d)/, '');
   const like = `%${q}%`;
@@ -1133,7 +1228,7 @@ app.get('/admin/photos', (req, res) => {
     WHERE ? = '' OR i.number LIKE ? OR c.code = ? ORDER BY i.id DESC LIMIT 60`).all(q, like, q);
   const phq = db.prepare('SELECT * FROM invoice_photos WHERE invoice_id = ? ORDER BY id'); const photos = (id) => phq.all(id);
   const back = `/admin/photos${q ? `?q=${encodeURIComponent(q)}` : ''}`;
-  adminRender(req, res, t('a_scale_photos'), `<div class="card"><p class="muted" style="margin-top:0">${esc(t('a_scale_hint'))}</p><form class="row"><div><input name="q" value="${esc(req.query.q || '')}" placeholder="${esc(t('invoice_no'))} / ${esc(t('code'))}"></div><button>${esc(t('search'))}</button></form></div>
+  adminRender(req, res, t('a_scale_photos'), `${scanForm(t)}<div class="card"><p class="muted" style="margin-top:0">${esc(t('a_scale_hint'))}</p><form class="row"><div><input name="q" value="${esc(req.query.q || '')}" placeholder="${esc(t('invoice_no'))} / ${esc(t('code'))}"></div><button>${esc(t('search'))}</button></form></div>
   <div class="card tbl"><table><tr><th>${esc(t('date'))}</th><th>${esc(t('invoice_no'))}</th><th>${esc(t('places'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('inv_photos'))}</th></tr>
   ${rows.map((i) => { const ph = photos(i.id); return `<tr><td>${esc(fmtDay(i.inv_date || i.created_at))}</td><td><b>${esc(i.number)}</b></td><td>${i.pieces || ''}</td><td>${num(i.total_weight)}</td>
     <td><div class="thumbs">${ph.map((f) => `<span><a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a><form method="post" action="/admin/invoices/${i.id}/photos/${f.id}/delete" onsubmit="return confirm('${esc(t('confirm_delete_photo'))}')"><input type="hidden" name="back" value="${esc(back)}"><button class="sec sm">✕</button></form></span>`).join('')}${photoForm(t, i.id, back)}</div></td></tr>`; }).join('')}</table></div>${PHOTO_JS}`);
