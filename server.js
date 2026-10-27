@@ -48,7 +48,8 @@ const REVIEW_DIR = require('path').join(require('path').dirname(PHOTO_DIR), 'rev
     if (m[2] ? fs.existsSync(rp(`s${m[1]}.jpg`)) && !fs.existsSync(rp(`s${f}`)) : fresh) fs.copyFileSync(require('path').join(seed, f), rp(`s${f}`));
   }
 }
-const REVIEW_RE = /^(s\d+|u\d+-[a-f0-9]{8})\.(jpg|png|webp)$/;
+// s/u — отзывы, w — фото складов, m — фото сотрудников для «О нас».
+const REVIEW_RE = /^(s\d+|[uwm]\d+-[a-f0-9]{8})\.(jpg|png|webp)$/;
 // Видеоотзывы: v<время>-<hex>.mp4 и обложка _t.jpg. Пока ffmpeg пережимает загрузку, в имени стоит -raw.
 const VIDEO_RE = /^v\d+-[a-f0-9]{8}\.(mp4|mov|webm)$/;
 const videoFiles = () => fs.readdirSync(REVIEW_DIR).filter((f) => VIDEO_RE.test(f)).sort().reverse();
@@ -74,7 +75,8 @@ for (const f of fs.readdirSync(REVIEW_DIR)) { if (/\.tmp\.mp4$/.test(f)) fs.unli
 // Лёгкое превью для плитки: <имя>_t.jpg, если его нет — сам скриншот.
 const reviewThumb = (f) => { const t = f.replace(/\.\w+$/, '_t.jpg'); return fs.existsSync(require('path').join(REVIEW_DIR, t)) ? t : f; };
 // Новые загрузки — сверху, стартовые — в исходном порядке.
-const reviewFiles = () => fs.readdirSync(REVIEW_DIR).filter((f) => REVIEW_RE.test(f))
+const whFiles = () => fs.readdirSync(REVIEW_DIR).filter((f) => REVIEW_RE.test(f) && f[0] === 'w').sort();
+const reviewFiles = () => fs.readdirSync(REVIEW_DIR).filter((f) => REVIEW_RE.test(f) && /^[su]/.test(f))
   .sort((a, b) => (a[0] !== b[0] ? (a[0] === 'u' ? -1 : 1) : a[0] === 'u' ? b.localeCompare(a) : a.localeCompare(b)));
 // Файл сканера с фото в ячейках бывает большим.
 const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
@@ -150,7 +152,7 @@ const promo = (req) => {
 };
 
 // Простая разметка: «# заголовок», «- пункт», остальное — абзацы.
-const { parse: parseInfo, infoPage } = require('./info-view');
+const { parse: parseInfo, infoPage, aboutPage, servicesPage } = require('./info-view');
 function renderInfo(text) {
   let html = ''; let list = false;
   for (const raw of String(text || '').split('\n')) {
@@ -182,25 +184,63 @@ for (const [path, key] of [['/about', 'about'], ['/services', 'services'], ['/in
     // С «Услуг» ведём на страховку, со страховки — сразу в WhatsApp.
     const more = key === 'services' ? `<a class="btn sec" href="/insurance">🛡 ${esc(req.t('nav_insurance'))} →</a>`
       : key === 'insurance' && wa ? `<a class="btn" href="https://wa.me/${esc(wa)}?text=${encodeURIComponent(req.t('ins_wa_msg'))}" target="_blank" rel="noopener">${esc(req.t('write_wa'))}</a>` : '';
-    if (key === 'about') return res.render(req.t('nav_about'), infoPage(req.t('nav_about'), req.t('about_sub'), parseInfo(setting(`about_${req.lang === 'zh' ? 'zh' : 'ru'}`))));
-    res.render(req.t('nav_' + key), `<div class="narrow fade">${renderInfoCards(setting(`${key}_${req.lang === 'zh' ? 'zh' : 'ru'}`))}${more ? `<p>${more}</p>` : ''}</div>`);
+    const t = req.t; const zh = req.lang === 'zh'; const text = parseInfo(setting(`${key}_${zh ? 'zh' : 'ru'}`));
+    if (key === 'about') {
+      const team = db.prepare('SELECT * FROM team ORDER BY sort, id').all(); const wh = whFiles();
+      const extra = (team.length ? `<h2 class="rv-h">👥 ${esc(t('about_team'))}</h2><div class="team">${team.map((m) => `<div class="tm">${m.photo ? `<img src="/review/${reviewThumb(m.photo)}" loading="lazy" alt="">` : `<span class="tm-av">${esc([...m.name][0] || '?')}</span>`}<b>${esc(m.name)}</b><small>${esc(zh && m.role_zh ? m.role_zh : m.role_ru)}</small></div>`).join('')}</div>` : '')
+        + (wh.length ? `<h2 class="rv-h">🏭 ${esc(t('about_wh'))}</h2><div class="rv-grid rv-wh">${wh.map((f) => `<a href="/review/${f}"><img src="/review/${reviewThumb(f)}" loading="lazy" decoding="async" alt=""></a>`).join('')}</div>${lightbox()}` : '')
+        + `<p style="text-align:center;margin-top:16px"><a class="btn sec" href="/reviews">⭐ ${esc(t('nav_reviews'))} →</a></p>`;
+      return res.render(t('nav_about'), aboutPage(text, extra + (wa ? `<p style="margin-top:12px"><a class="btn" style="display:block;text-align:center" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener">💬 ${esc(t('write_wa'))}</a></p>` : '')));
+    }
+    if (key === 'services') {
+      // Страхование — на свою страницу, остальное — вопрос в WhatsApp с названием услуги.
+      const ask = (name) => (/страх|保险/i.test(name) ? `<a href="/insurance">${esc(t('more_info'))} →</a>`
+        : wa ? `<a href="https://wa.me/${esc(wa)}?text=${encodeURIComponent(`${t('ask_service')}: ${name}`)}" target="_blank" rel="noopener">${esc(t('ask'))} →</a>` : '');
+      return res.render(t('nav_services'), servicesPage(t('nav_services'), t('services_sub'), text, ask));
+    }
+    res.render(t('nav_' + key), infoPage(t('nav_' + key), '', text, { open: true, extra: more ? `<p>${more}</p>` : '' }));
   });
 }
 
-app.get('/reviews', (req, res) => {
-  const t = req.t; const wa = setting('whatsapp'); const files = reviewFiles(); const videos = videoFiles();
-  res.render(t('nav_reviews'), `<div class="iv narrow rv"><div class="iv-hero"><h1>${esc(t('nav_reviews'))}</h1><small>${esc(t('reviews_sub'))}</small></div>
-    <div class="rv-grid">${files.map((f, i) => `<a href="/review/${f}"><img src="/review/${reviewThumb(f)}" width="360" height="480" loading="${i < 6 ? 'eager' : 'lazy'}" decoding="async" alt="${esc(t('nav_reviews'))} ${i + 1}"></a>`).join('')}</div>
-    ${videos.length ? `<h2 class="rv-h">🎬 ${esc(t('reviews_video'))}</h2><div class="rv-grid rv-v">${videos.map((f) => { const p = reviewThumb(f); return `<video controls playsinline preload="${p === f ? 'metadata' : 'none'}"${p === f ? '' : ` poster="/review/${p}"`} src="/review/${f}"></video>`; }).join('')}</div>` : ''}
-    ${wa ? `<p style="text-align:center"><a class="btn" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener">${esc(t('write_wa'))}</a></p>` : ''}</div>
-    <div class="rv-box" hidden><button class="rv-x" aria-label="✕">✕</button><button class="rv-p" aria-label="‹">‹</button><img alt=""><button class="rv-n" aria-label="›">›</button></div>
+// Формы с data-shrink: перед отправкой сжимаем фото в браузере (до 900px + превью 360×480),
+// чтобы на сайте всё открывалось быстро. data-shrink="auto" — отправка сразу после выбора файлов.
+const SHRINK_JS = `<script>(()=>{const jpg=(img,w,h,sh)=>new Promise((r)=>{const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,img.width,sh,0,0,w,h);c.toBlob(r,'image/jpeg',.78)});
+  document.querySelectorAll('form[data-shrink]').forEach((f)=>{const inp=f.querySelector('input[type=file]');
+  const go=async()=>{try{const fd=new FormData(f);fd.delete(inp.name);for(const file of inp.files){const img=await createImageBitmap(file);const k=Math.min(1,900/img.width);
+    fd.append(inp.name,await jpg(img,Math.round(img.width*k),Math.round(img.height*k),img.height),'r.jpg');
+    fd.append('thumbs',await jpg(img,360,Math.min(480,Math.round(img.height*360/img.width)),Math.min(img.height,img.width*4/3)),'t.jpg')}
+    await fetch(f.action,{method:'POST',body:fd});location.reload()}catch(e){f.submit()}};
+  if(f.dataset.shrink==='auto')inp.onchange=go;else f.onsubmit=(e)=>{e.preventDefault();go()}})})()</script>`;
+// Сохраняет загруженные фото с превью под префиксом; возвращает имена файлов.
+function saveShots(req, prefix) {
+  const thumbs = (req.files && req.files.thumbs) || []; const out = [];
+  ((req.files && req.files.photos) || []).forEach((f, i) => {
+    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[f.mimetype]; if (!ext) return;
+    const base = `${prefix}${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    fs.writeFileSync(require('path').join(REVIEW_DIR, `${base}.${ext}`), f.buffer);
+    if (thumbs[i] && thumbs[i].mimetype === 'image/jpeg') fs.writeFileSync(require('path').join(REVIEW_DIR, `${base}_t.jpg`), thumbs[i].buffer);
+    out.push(`${base}.${ext}`);
+  });
+  return out;
+}
+const shotUpload = photoUpload.fields([{ name: 'photos', maxCount: 10 }, { name: 'thumbs', maxCount: 10 }]);
+const dropShot = (f) => { for (const x of [f, f.replace(/\.\w+$/, '_t.jpg')]) { try { fs.unlinkSync(require('path').join(REVIEW_DIR, x)); } catch {} } };
+// Просмотр фото на весь экран для всех ссылок в .rv-grid: свайп, стрелки, Esc.
+const lightbox = () => `<div class="rv-box" hidden><button class="rv-x" aria-label="✕">✕</button><button class="rv-p" aria-label="‹">‹</button><img alt=""><button class="rv-n" aria-label="›">›</button></div>
     <script>(()=>{document.addEventListener('play',(e)=>document.querySelectorAll('video').forEach((v)=>{if(v!==e.target)v.pause()}),true);const a=[...document.querySelectorAll('.rv-grid a')],b=document.querySelector('.rv-box'),im=b.querySelector('img');let i=0,x=0;
     const pre=(k)=>{new Image().src=a[(k+a.length)%a.length].href};
     const show=(k)=>{i=(k+a.length)%a.length;const n=i,full=new Image();im.src=a[i].querySelector('img').src;full.onload=()=>{if(n===i)im.src=full.src};full.src=a[i].href;b.hidden=false;document.body.style.overflow='hidden';pre(i+1);pre(i-1)};
     a.forEach((el)=>{el.addEventListener('touchstart',()=>pre(a.indexOf(el)),{passive:true});el.onmouseenter=()=>pre(a.indexOf(el))});const hide=()=>{b.hidden=true;document.body.style.overflow=''};
     a.forEach((el,k)=>el.onclick=(e)=>{e.preventDefault();show(k)});b.querySelector('.rv-x').onclick=hide;b.querySelector('.rv-p').onclick=()=>show(i-1);b.querySelector('.rv-n').onclick=()=>show(i+1);
     b.onclick=(e)=>{if(e.target===b)hide()};document.onkeydown=(e)=>{if(b.hidden)return;if(e.key==='Escape')hide();if(e.key==='ArrowLeft')show(i-1);if(e.key==='ArrowRight')show(i+1)};
-    b.ontouchstart=(e)=>{x=e.touches[0].clientX};b.ontouchend=(e)=>{const d=e.changedTouches[0].clientX-x;if(Math.abs(d)>50)show(i+(d<0?1:-1))}})()</script>`);
+    b.ontouchstart=(e)=>{x=e.touches[0].clientX};b.ontouchend=(e)=>{const d=e.changedTouches[0].clientX-x;if(Math.abs(d)>50)show(i+(d<0?1:-1))}})()</script>`;
+app.get('/reviews', (req, res) => {
+  const t = req.t; const wa = setting('whatsapp'); const files = reviewFiles(); const videos = videoFiles();
+  res.render(t('nav_reviews'), `<div class="iv narrow rv"><div class="iv-hero"><h1>${esc(t('nav_reviews'))}</h1><small>${esc(t('reviews_sub'))}</small></div>
+    <div class="rv-grid">${files.map((f, i) => `<a href="/review/${f}"><img src="/review/${reviewThumb(f)}" width="360" height="480" loading="${i < 6 ? 'eager' : 'lazy'}" decoding="async" alt="${esc(t('nav_reviews'))} ${i + 1}"></a>`).join('')}</div>
+    ${videos.length ? `<h2 class="rv-h">🎬 ${esc(t('reviews_video'))}</h2><div class="rv-grid rv-v">${videos.map((f) => { const p = reviewThumb(f); return `<video controls playsinline preload="${p === f ? 'metadata' : 'none'}"${p === f ? '' : ` poster="/review/${p}"`} src="/review/${f}"></video>`; }).join('')}</div>` : ''}
+    ${wa ? `<p style="text-align:center"><a class="btn" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener">${esc(t('write_wa'))}</a></p>` : ''}</div>
+    ${lightbox()}`);
 });
 app.get('/review/:file', (req, res) => {
   const f = String(req.params.file);
@@ -1915,15 +1955,22 @@ app.get('/admin/settings', (req, res) => {
       <div><label>${esc(t('password'))}</label><input name="pw" required minlength="6" type="text" autocomplete="off"></div></div>
       <p><button>${esc(t('s_staff_add'))}</button></p></form>
     <div class="hint">${ROLES.map((r) => `<div><b>${esc(t('role_' + r))}:</b> ${esc(t('access_' + r))}</div>`).join('')}</div></div>
+    <div class="card" id="team"><h2>👥 ${esc(t('s_team'))}</h2><p class="muted">${esc(t('s_team_hint'))} <a href="/about" target="_blank">/about</a></p>
+    <div class="team">${db.prepare('SELECT * FROM team ORDER BY sort, id').all().map((m) => `<div class="tm">${m.photo ? `<img src="/review/${reviewThumb(m.photo)}" alt="">` : `<span class="tm-av">${esc([...m.name][0] || '?')}</span>`}<b>${esc(m.name)}</b><small>${esc(m.role_ru)}${m.role_zh ? ` / ${esc(m.role_zh)}` : ''}</small>
+      <form method="post" action="/admin/settings/team/${m.id}/del" style="margin:6px 0 0" onsubmit="return confirm('${esc(t('s_reviews_del'))}?')"><button class="sec sm">✕ ${esc(t('s_reviews_del'))}</button></form></div>`).join('')}</div>
+    <h3>${esc(t('s_team_add'))}</h3>
+    <form method="post" action="/admin/settings/team" enctype="multipart/form-data" data-shrink><div class="row"><div><label>${esc(t('name'))}</label><input name="name" required maxlength="60" placeholder="Ульяна"></div>
+      <div><label>${esc(t('s_team_role'))}</label><input name="role_ru" maxlength="120" placeholder="Менеджер, говорит по-русски"></div></div>
+      <div class="row"><div><label>${esc(t('s_team_role'))} (中文)</label><input name="role_zh" maxlength="120" placeholder="客服经理，会说俄语"></div>
+      <div><label>${esc(t('s_team_photo'))}</label><input type="file" name="photos" accept="image/jpeg,image/png,image/webp"></div></div>
+      <p><button>${esc(t('s_team_add'))}</button></p></form>
+    <h3>🏭 ${esc(t('about_wh'))}</h3>
+    <form method="post" action="/admin/settings/wh-photos" enctype="multipart/form-data" data-shrink="auto"><label class="btn sec" style="cursor:pointer">📷 ${esc(t('s_wh_add'))}<input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple hidden></label></form>
+    <div class="photos">${whFiles().map((f) => `<div><a href="/review/${f}" target="_blank"><img src="/review/${reviewThumb(f)}" loading="lazy" alt=""></a>
+      <form method="post" action="/admin/settings/reviews/del" style="margin:0" onsubmit="return confirm('${esc(t('s_reviews_del'))}?')"><input type="hidden" name="file" value="${f}"><button class="sec sm">✕ ${esc(t('s_reviews_del'))}</button></form></div>`).join('')}</div></div>
     <div class="card" id="reviews"><h2>⭐ ${esc(t('nav_reviews'))}</h2><p class="muted">${esc(t('s_reviews_hint'))} <a href="/reviews" target="_blank">/reviews</a></p>
-    <form method="post" action="/admin/settings/reviews" enctype="multipart/form-data" id="rvf"><label class="btn sec" style="cursor:pointer">📷 ${esc(t('s_reviews_add'))}<input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple hidden></label></form>
-    <script>(()=>{const f=document.getElementById('rvf'),inp=f.querySelector('input');
-    // Сжимаем в браузере: скриншот до 900px и превью 360×480, чтобы страница отзывов открывалась быстро.
-    const jpg=(img,w,h,sh)=>new Promise((r)=>{const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,img.width,sh,0,0,w,h);c.toBlob(r,'image/jpeg',.78)});
-    inp.onchange=async()=>{try{const fd=new FormData();for(const file of inp.files){const img=await createImageBitmap(file);const k=Math.min(1,900/img.width);
-      fd.append('photos',await jpg(img,Math.round(img.width*k),Math.round(img.height*k),img.height),'r.jpg');
-      fd.append('thumbs',await jpg(img,360,Math.min(480,Math.round(img.height*360/img.width)),Math.min(img.height,img.width*4/3)),'t.jpg')}
-      await fetch(f.action,{method:'POST',body:fd});location.reload()}catch(e){f.submit()}}})()</script>
+    <form method="post" action="/admin/settings/reviews" enctype="multipart/form-data" data-shrink="auto"><label class="btn sec" style="cursor:pointer">📷 ${esc(t('s_reviews_add'))}<input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple hidden></label></form>
+    ${SHRINK_JS}
     <div class="photos">${reviewFiles().map((f) => `<div style="position:relative;display:inline-block"><a href="/review/${f}" target="_blank"><img src="/review/${reviewThumb(f)}" loading="lazy" alt=""></a>
       <form method="post" action="/admin/settings/reviews/del" style="margin:0" onsubmit="return confirm('${esc(t('s_reviews_del'))}?')"><input type="hidden" name="file" value="${f}"><button class="sec sm">✕ ${esc(t('s_reviews_del'))}</button></form></div>`).join('')}</div>
     <h3>🎬 ${esc(t('reviews_video'))}</h3><p class="muted">${esc(t('s_video_hint'))}</p>
@@ -1932,15 +1979,20 @@ app.get('/admin/settings', (req, res) => {
     <div class="photos">${videoFiles().map((f) => `<div style="position:relative;display:inline-block"><a href="/review/${f}" target="_blank"><img src="/review/${reviewThumb(f) === f ? '' : reviewThumb(f)}" loading="lazy" alt="🎬"></a>
       <form method="post" action="/admin/settings/reviews/del" style="margin:0" onsubmit="return confirm('${esc(t('s_reviews_del'))}?')"><input type="hidden" name="file" value="${f}"><button class="sec sm">✕ ${esc(t('s_reviews_del'))}</button></form></div>`).join('')}</div></div>`);
 });
-app.post('/admin/settings/reviews', photoUpload.fields([{ name: 'photos', maxCount: 10 }, { name: 'thumbs', maxCount: 10 }]), (req, res) => {
-  const thumbs = (req.files && req.files.thumbs) || [];
-  ((req.files && req.files.photos) || []).forEach((f, i) => {
-    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[f.mimetype]; if (!ext) return;
-    const base = `u${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-    fs.writeFileSync(require('path').join(REVIEW_DIR, `${base}.${ext}`), f.buffer);
-    if (thumbs[i] && thumbs[i].mimetype === 'image/jpeg') fs.writeFileSync(require('path').join(REVIEW_DIR, `${base}_t.jpg`), thumbs[i].buffer);
-  });
-  res.redirect('/admin/settings#reviews');
+app.post('/admin/settings/reviews', shotUpload, (req, res) => { saveShots(req, 'u'); res.redirect('/admin/settings#reviews'); });
+app.post('/admin/settings/wh-photos', shotUpload, (req, res) => { saveShots(req, 'w'); res.redirect('/admin/settings#team'); });
+app.post('/admin/settings/team', shotUpload, (req, res) => {
+  const b = req.body; const name = String(b.name || '').trim().slice(0, 60);
+  if (name) {
+    const photo = saveShots(req, 'm')[0] || ''; const max = db.prepare('SELECT MAX(sort) m FROM team').get().m || 0;
+    db.prepare('INSERT INTO team (name, role_ru, role_zh, photo, sort) VALUES (?, ?, ?, ?, ?)').run(name, String(b.role_ru || '').trim().slice(0, 120), String(b.role_zh || '').trim().slice(0, 120), photo, max + 1);
+  }
+  res.redirect('/admin/settings#team');
+});
+app.post('/admin/settings/team/:id/del', (req, res) => {
+  const m = db.prepare('SELECT * FROM team WHERE id = ?').get(parseInt(req.params.id, 10));
+  if (m) { if (m.photo) dropShot(m.photo); db.prepare('DELETE FROM team WHERE id = ?').run(m.id); }
+  res.redirect('/admin/settings#team');
 });
 app.post('/admin/settings/reviews/video', (req, res) => videoUpload.array('videos', 5)(req, res, (err) => {
   if (err) req.session.flash = req.t('s_video_bad');
@@ -1949,8 +2001,8 @@ app.post('/admin/settings/reviews/video', (req, res) => videoUpload.array('video
 }));
 app.post('/admin/settings/reviews/del', (req, res) => {
   const f = String(req.body.file || '');
-  if (REVIEW_RE.test(f) || VIDEO_RE.test(f)) for (const x of [f, f.replace(/\.\w+$/, '_t.jpg')]) { try { fs.unlinkSync(require('path').join(REVIEW_DIR, x)); } catch {} }
-  res.redirect('/admin/settings#reviews');
+  if ((REVIEW_RE.test(f) && f[0] !== 'm') || VIDEO_RE.test(f)) dropShot(f);
+  res.redirect(f[0] === 'w' ? '/admin/settings#team' : '/admin/settings#reviews');
 });
 
 app.post('/admin/settings/staff', (req, res) => {
