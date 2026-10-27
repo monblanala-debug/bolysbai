@@ -115,11 +115,12 @@ body{padding-bottom:72px}
 .prow{display:flex;gap:12px;align-items:center}.prow>div{flex:1;min-width:0}
 .news{border-left:4px solid var(--brand)}.news h2{margin-bottom:6px}.news-i{padding:6px 0;border-top:1px solid var(--line)}.news-i:first-of-type{border-top:0}
 .thumbs{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.thumbs span{position:relative}.thumbs img{width:56px;height:56px;object-fit:cover;border-radius:6px;display:block}.thumbs span form{position:absolute;top:-6px;right:-6px;margin:0}.thumbs span button{padding:0 6px;font-size:12px;line-height:18px}
-.promo{display:flex;align-items:center;gap:12px;background:linear-gradient(90deg,#fff1f1,#fff);border:1px solid #f6c9cb;border-left:4px solid var(--brand);border-radius:12px;padding:12px 14px;margin:0 0 16px}
-.promo-ic{flex:0 0 40px;height:40px;border-radius:50%;background:var(--brand);color:#fff;font-weight:800;font-size:20px;display:flex;align-items:center;justify-content:center}
-.promo-tx{flex:1;min-width:0;font-size:14px;line-height:1.35}.promo-tx b{display:block;font-size:15px;margin-bottom:2px}.promo-tx span{color:#6b5b5c}
-.promo-btn{flex:0 0 auto;background:#22c55e;padding:9px 14px;font-size:14px}
-@media (max-width:520px){.promo{flex-wrap:wrap}.promo-btn{flex:1 0 100%;text-align:center}}
+.promo{background:linear-gradient(135deg,#e5262d,#a5121a);color:#fff;border-radius:18px;padding:20px;margin:0 0 16px;position:relative;overflow:hidden}
+.promo:after{content:'¥';position:absolute;right:-4px;bottom:-40px;font-size:170px;font-weight:900;opacity:.12;line-height:1;pointer-events:none}
+.promo b{display:block;font-size:21px;line-height:1.25;margin-bottom:6px;position:relative}.promo p{margin:0 0 14px;opacity:.94;font-size:15px;max-width:560px;position:relative}
+.promo-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;position:relative}.promo-chips span{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);padding:4px 12px;border-radius:999px;font-weight:700;font-size:13px}
+.promo-btn{background:#fff;color:var(--brand);position:relative}.promo-btn:hover{background:#fdecec;color:var(--brand-dark)}
+@media (max-width:520px){.promo-btn{display:block;text-align:center}}
 @media print{header,footer,.wa-fab,.noprint{display:none!important}.wb-sheet{width:auto!important;transform:none!important;font-size:12px}.wb-fit{height:auto!important}.wb .goods .l{font-size:10px}.wb .v{font-size:13px}.card{border:0}body{background:#fff}}
 `;
 

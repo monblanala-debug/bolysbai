@@ -104,8 +104,9 @@ const promo = (req) => {
   const title = setting(zh ? 'promo_title_zh' : 'promo_title_ru'); const text = setting(zh ? 'promo_text_zh' : 'promo_text_ru');
   if (!title) return '';
   const wa = setting('whatsapp');
-  const msg = zh ? '您好！需要帮忙付款/充值人民币。' : 'Здравствуйте! Нужна помощь с оплатой поставщику / пополнением юаней.';
-  return `<div class="promo noprint"><div class="promo-ic">¥</div><div class="promo-tx"><b>${esc(title)}</b><span>${esc(text)}</span></div>
+  const msg = zh ? '您好！需要帮忙在中国付款。' : 'Здравствуйте! Нужно оплатить заказ / поставщику в Китае.';
+  const chips = req.t('promo_chips').split('|').map((c) => `<span>${esc(c)}</span>`).join('');
+  return `<div class="promo noprint"><b>${esc(title)}</b><p>${esc(text)}</p><div class="promo-chips">${chips}</div>
     ${wa ? `<a class="btn promo-btn" href="https://wa.me/${esc(wa)}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">${esc(req.t('promo_btn'))}</a>` : ''}</div>`;
 };
 
