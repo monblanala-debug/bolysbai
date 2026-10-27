@@ -290,7 +290,7 @@ app.get('/track', (req, res) => {
     const live = all.filter((i) => invStage(i) !== 'delivered');
     const list = live.length ? live : all.slice(0, 5);
     results = `<div class="fade"><h2>${esc(t('track_mine'))} · ${esc(dispCode(client.code))}</h2><div class="alert info">${esc(t('track_eta'))}</div>
-      ${list.length ? list.map(card).join('') : `<div class="card"><p class="muted" style="margin:0">${esc(t('track_mine_none'))}</p></div>`}</div>`;
+      ${list.length ? list.map(card).join('') : `<div class="card"><p class="muted" style="margin:0">${esc(t('track_mine_none'))}</p></div>`}${myParcels(req, client, '/track')}</div>`;
   }
   res.render(t('track_title'), `${client && !tracks.length ? results : ''}<div class="card"><h1>${esc(t('track_title'))}</h1>
     <form method="get"><textarea name="q" placeholder="${esc(t('track_placeholder'))}">${esc(tracks.join('\n'))}</textarea>
@@ -350,7 +350,7 @@ function invoicesTable(t, invoices, base, withPaid = true, canDelete = false) {
 
 // Мои трек-номера: клиент добавляет треки заранее; когда склад отсканирует коробку, тут появятся фото и «Принят на складе».
 const normTrack = (x) => String(x || '').trim().toUpperCase().replace(/\s+/g, '');
-function myParcels(req, client) {
+function myParcels(req, client, back = '/cabinet') {
   const t = req.t;
   const list = db.prepare('SELECT * FROM parcels WHERE client_id = ? ORDER BY (status = \'expected\'), COALESCE(scanned_at, updated_at) DESC LIMIT 200').all(client.id);
   const ph = db.prepare('SELECT file FROM parcel_photos WHERE parcel_id = ? ORDER BY id');
@@ -358,12 +358,12 @@ function myParcels(req, client) {
     <div class="row" style="align-items:center"><b>${esc(p.track)}</b><div style="flex:0 0 auto">${statusBadge(t, p.status)}</div></div>
     <div class="muted" style="font-size:14px">${p.status === 'expected' ? esc(t('trk_wait')) : `${esc(t('trk_received'))}${p.scanned_at ? ': ' + esc(fmtDay(p.scanned_at)) : ''}${p.places ? ` · ${p.places} ${esc(t('places').toLowerCase())}` : ''}`}</div>
     ${f.length ? `<div class="thumbs" style="margin-top:6px">${f.map((x) => `<a href="/photo/${esc(x.file)}" target="_blank"><img src="/photo/${esc(x.file)}" loading="lazy" alt=""></a>`).join('')}</div>` : ''}
-    <form method="post" action="/cabinet/tracks/${p.id}/desc" class="row" style="margin:6px 0 0;align-items:center;gap:6px"><div><input name="description" maxlength="120" value="${esc(p.description || '')}" placeholder="${esc(t('trk_desc_ph'))}"></div><button class="sec sm" style="flex:0 0 auto">${esc(t('save'))}</button></form>
-    ${p.status === 'expected' ? `<form method="post" action="/cabinet/tracks/${p.id}/delete" style="margin:6px 0 0"><button class="sec sm">${esc(t('trk_remove'))}</button></form>` : ''}</div>`; }).join('');
+    <form method="post" action="/cabinet/tracks/${p.id}/desc" class="row" style="margin:6px 0 0;align-items:center;gap:6px"><input type="hidden" name="back" value="${back}"><div><input name="description" maxlength="120" value="${esc(p.description || '')}" placeholder="${esc(t('trk_desc_ph'))}"></div><button class="sec sm" style="flex:0 0 auto">${esc(t('save'))}</button></form>
+    ${p.status === 'expected' ? `<form method="post" action="/cabinet/tracks/${p.id}/delete" style="margin:6px 0 0"><input type="hidden" name="back" value="${back}"><button class="sec sm">${esc(t('trk_remove'))}</button></form>` : ''}</div>`; }).join('');
   const msg = req.session.trkMsg; delete req.session.trkMsg;
   return `<div class="card" id="tracks"><h2>${esc(t('trk_title'))}</h2><p class="muted">${esc(t('trk_hint'))}</p>
     ${msg ? `<div class="alert info">${esc(msg)}</div>` : ''}
-    <form method="post" action="/cabinet/tracks"><textarea name="tracks" required placeholder="KY4001168305249&#10;YT1234567890"></textarea><p><button>${esc(t('trk_add'))}</button></p></form>
+    <form method="post" action="/cabinet/tracks"><input type="hidden" name="back" value="${back}"><textarea name="tracks" required placeholder="KY4001168305249&#10;YT1234567890"></textarea><p><button>${esc(t('trk_add'))}</button></p></form>
     ${rows || `<p class="muted">${esc(t('trk_none'))}</p>`}</div>`;
 }
 app.post('/cabinet/tracks', (req, res) => {
@@ -379,19 +379,19 @@ app.post('/cabinet/tracks', (req, res) => {
     else taken.push(tr);
   }
   req.session.trkMsg = `${req.t('trk_added')}: ${added}${taken.length ? `. ${req.t('trk_taken')}: ${taken.join(', ')}` : ''}`;
-  res.redirect('/cabinet#tracks');
+  res.redirect(`${req.body.back === '/track' ? '/track' : '/cabinet'}#tracks`);
 });
 // Клиент подписывает, что в посылке (видно и складу в «Посылках»).
 app.post('/cabinet/tracks/:id/desc', (req, res) => {
   if (req.session.clientId) db.prepare("UPDATE parcels SET description = ?, updated_at = datetime('now') WHERE id = ? AND client_id = ?").run(String(req.body.description || '').trim().slice(0, 120), parseInt(req.params.id, 10), req.session.clientId);
-  res.redirect('/cabinet#tracks');
+  res.redirect(`${req.body.back === '/track' ? '/track' : '/cabinet'}#tracks`);
 });
 app.post('/cabinet/tracks/:id/delete', (req, res) => {
   if (req.session.clientId) {
     const p = db.prepare("SELECT id FROM parcels WHERE id = ? AND client_id = ? AND status = 'expected'").get(parseInt(req.params.id, 10), req.session.clientId);
     if (p) { db.prepare('DELETE FROM parcel_events WHERE parcel_id = ?').run(p.id); db.prepare('DELETE FROM parcels WHERE id = ?').run(p.id); }
   }
-  res.redirect('/cabinet#tracks');
+  res.redirect(`${req.body.back === '/track' ? '/track' : '/cabinet'}#tracks`);
 });
 
 app.get('/cabinet', (req, res) => {
