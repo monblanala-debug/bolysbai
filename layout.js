@@ -147,6 +147,20 @@ body{padding-bottom:72px}
 .promo-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;position:relative}.promo-chips span{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);padding:4px 12px;border-radius:999px;font-weight:700;font-size:13px}
 .promo-btn{background:#fff;color:var(--brand);position:relative}.promo-btn:hover{background:#fdecec;color:var(--brand-dark)}
 @media (max-width:520px){.promo-btn{display:block;text-align:center}}
+.road{position:relative;height:52px;background:linear-gradient(#f3eaea,#f3eaea 30px,#3a3b40 30px);overflow:hidden}
+.road:after{content:"";position:absolute;left:0;right:0;bottom:10px;height:2px;background:repeating-linear-gradient(90deg,#fff 0 18px,transparent 18px 36px);animation:rd-dash 1s linear infinite}
+.road .tr{position:absolute;bottom:4px;left:0;animation:rd-drive 12s linear infinite}
+.bgtr{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}.bgtr span{position:absolute;left:0;opacity:.10}
+.bgtr .a{top:22%;animation:rd-ea 38s linear infinite}.bgtr .b{top:58%;animation:rd-eb 46s linear infinite}.bgtr .c{top:82%;animation:rd-ea 52s linear infinite -20s}
+.bgtr .d{top:0;left:15%;animation:rd-ec 60s linear infinite}.bgtr .e{top:0;left:70%;animation:rd-ec 70s linear infinite -30s}
+.dk-hero,.iv-hero{position:relative;overflow:hidden}.dk-hero>*,.iv-hero>*{position:relative;z-index:1}
+.dk-hero:before,.iv-hero:before{content:"";position:absolute;top:14px;left:0;width:54px;height:27px;background:url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCAzMiI+PHBhdGggZD0iTTIgMThsOC0yIDYgNmg0bC0zLTcgMjItNCA4LThoNWwtNCA5IDEyIDJjMyAxIDMgMyAwIDRsLTQ0IDZjLTMgMC01LTEtNi0yeiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==") no-repeat center/contain;opacity:.3;animation:rd-fly 14s linear infinite}
+@keyframes rd-dash{to{background-position:-36px 0}}@keyframes rd-drive{from{transform:translateX(-110px)}to{transform:translateX(100vw)}}
+@keyframes rd-ea{from{transform:translateX(-120px)}to{transform:translateX(110vw)}}@keyframes rd-eb{from{transform:translateX(110vw) scaleX(-1)}to{transform:translateX(-120px) scaleX(-1)}}
+@keyframes rd-ec{from{transform:translate(-80px,-60px) rotate(35deg)}to{transform:translate(60vw,110vh) rotate(35deg)}}
+@keyframes rd-fly{from{transform:translate(-60px,30px)}to{transform:translate(110vw,-10px)}}
+@media (prefers-reduced-motion:reduce){.road:after,.road .tr,.bgtr span,.dk-hero:before,.iv-hero:before{animation:none}.bgtr{display:none}}
+@media print{.road,.bgtr{display:none}}
 @media print{header,footer,.wa-fab,.noprint{display:none!important}.wb-sheet{width:auto!important;transform:none!important;font-size:12px}.wb-fit{height:auto!important}.wb .goods .l{font-size:10px}.wb .v{font-size:13px}.card{border:0}body{background:#fff}}
 `;
 
@@ -168,6 +182,10 @@ hero.querySelectorAll('.hl').forEach(x=>x.classList.remove('hl'));hero.classList
 hero.querySelectorAll('[data-to="'+g.dataset.key+'"]').forEach(x=>x.classList.add('hl'))});
 `;
 
+// Публичные страницы: фура «151» едет по дороге под меню, на фоне бледные фуры в разные стороны.
+const TRUCK = '<svg viewBox="0 0 120 50" width="96" height="40" aria-hidden="true"><rect x="2" y="6" width="72" height="30" rx="3" fill="#e5262d"/><text x="38" y="27" font-size="13" font-weight="800" fill="#fff" text-anchor="middle" font-family="system-ui">151</text><path d="M76 14h22l14 12v10H76z" fill="#17181c"/><path d="M82 18h14l8 8H82z" fill="#9fc6e8"/><circle cx="20" cy="40" r="7" fill="#17181c"/><circle cx="20" cy="40" r="3" fill="#ccc"/><circle cx="58" cy="40" r="7" fill="#17181c"/><circle cx="58" cy="40" r="3" fill="#ccc"/><circle cx="98" cy="40" r="7" fill="#17181c"/><circle cx="98" cy="40" r="3" fill="#ccc"/></svg>';
+const ROAD = `<div class="road noprint" aria-hidden="true"><div class="tr">${TRUCK}</div></div>`;
+const BG_TRUCKS = `<div class="bgtr" aria-hidden="true">${['a', 'b', 'c', 'd', 'e'].map((c) => `<span class="${c}">${TRUCK}</span>`).join('')}</div>`;
 function page({ title, body, t, lang, path, session, whatsapp }) {
   const wa = String(whatsapp || '').replace(/\D/g, '');
   const adm = String(path || '').startsWith('/admin'); // в админке подвал и кнопка WhatsApp не нужны
@@ -181,8 +199,8 @@ function page({ title, body, t, lang, path, session, whatsapp }) {
   const back = encodeURIComponent(path);
   return `<!doctype html><html lang="${lang === 'zh' ? 'zh-CN' : lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · ${esc(t('brand'))}</title><style>${CSS}</style></head><body>
-<header><div class="in"><a class="logo" href="/"><img src="/logo.png" alt="Cargo 151" width="96" height="45"></a><nav>${nav}${logout}</nav>
-<div class="lang"><a href="/lang/ru?back=${back}" class="${lang === 'ru' ? 'on' : ''}">RU</a><a href="/lang/kk?back=${back}" class="${lang === 'kk' ? 'on' : ''}">ҚАЗ</a><a href="/lang/zh?back=${back}" class="${lang === 'zh' ? 'on' : ''}">中文</a></div></div></header>
+${adm ? '' : BG_TRUCKS}<header><div class="in"><a class="logo" href="/"><img src="/logo.png" alt="Cargo 151" width="96" height="45"></a><nav>${nav}${logout}</nav>
+<div class="lang"><a href="/lang/ru?back=${back}" class="${lang === 'ru' ? 'on' : ''}">RU</a><a href="/lang/kk?back=${back}" class="${lang === 'kk' ? 'on' : ''}">ҚАЗ</a><a href="/lang/zh?back=${back}" class="${lang === 'zh' ? 'on' : ''}">中文</a></div></div></header>${adm ? '' : ROAD}
 <main>${body}</main>${adm ? '' : `<footer>${wa ? `<a href="https://wa.me/${wa}" target="_blank" rel="noopener">WhatsApp ${esc(waPretty)}</a> · ` : ''}<a href="https://www.instagram.com/cargo.151" target="_blank" rel="noopener">Instagram @cargo.151</a></footer>`}${wa && !adm ? `<a class="wa-fab noprint" href="https://wa.me/${wa}" target="_blank" rel="noopener" aria-label="WhatsApp"><svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path fill="#fff" d="M16 3a13 13 0 0 0-11.2 19.6L3 29l6.6-1.7A13 13 0 1 0 16 3zm0 23.6c-2 0-3.9-.5-5.6-1.5l-.4-.2-3.9 1 1-3.8-.3-.4A10.6 10.6 0 1 1 16 26.6zm5.8-7.9c-.3-.2-1.9-.9-2.2-1s-.5-.2-.7.2-.8 1-1 1.2-.4.2-.7.1a8.7 8.7 0 0 1-4.3-3.8c-.3-.6.3-.5 1-1.7.1-.2 0-.4 0-.5l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6a1.2 1.2 0 0 0-.9.4 3.7 3.7 0 0 0-1.1 2.7 6.4 6.4 0 0 0 1.3 3.4 14.7 14.7 0 0 0 5.7 5c2.1.9 2.9 1 4 .8a3.4 3.4 0 0 0 2.2-1.6 2.8 2.8 0 0 0 .2-1.6c-.1-.1-.3-.2-.6-.4z"/></svg><span>${esc(t('write_wa'))}</span></a>` : ''}<script>${JS}</script></body></html>`;
 }
 

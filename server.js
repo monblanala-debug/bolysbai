@@ -92,7 +92,7 @@ app.use((req, res, next) => {
   const al = req.headers['accept-language'] || '';
   req.lang = m ? m[1] : /^zh/i.test(al) ? 'zh' : /^kk/i.test(al) ? 'kk' : 'ru';
   req.t = tr(req.lang);
-  res.render = (title, body) => res.send(page({ title, body, t: req.t, lang: req.lang, path: req.path, session: req.session, whatsapp: setting('whatsapp') }));
+  res.render = (title, body) => res.send(page({ title, body, t: req.t, lang: req.lang, path: req.originalUrl.split('?')[0], session: req.session, whatsapp: setting('whatsapp') }));
   next();
 });
 
