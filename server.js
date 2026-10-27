@@ -421,6 +421,14 @@ function invoiceValue(inv, k) {
   return NUM_FIELDS.includes(k) ? num(inv[k]) : inv[k] || '';
 }
 
+// Владельцу — кнопка сразу в WhatsApp клиента по этой накладной (например, отправить фото с весов).
+function waClient(req, inv) {
+  if (!isOwner(req)) return '';
+  const c = db.prepare('SELECT phone FROM clients WHERE id = ?').get(inv.client_id);
+  if (!c || isStub(c)) return '';
+  const msg = `${req.t('wa_inv_msg')} ${inv.number}`;
+  return `<a class="btn sm" style="flex:0 0 auto;background:#25d366" href="https://wa.me/${esc(c.phone)}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">WhatsApp +${esc(c.phone)}</a>`;
+}
 function invoicePage(req, inv) {
   const t = req.t;
   const cell = ([k, zh, ru]) => `<div class="c"><div class="l">${esc(zh)}<br>${esc(ru)}</div><div class="v">${esc(invoiceValue(inv, k))}</div></div>`;
@@ -428,7 +436,7 @@ function invoicePage(req, inv) {
   const parcels = db.prepare('SELECT track FROM parcels WHERE invoice_id = ? ORDER BY id').all(inv.id);
   const photos = invoicePhotos(inv.id);
   return `<div class="row noprint" style="align-items:center;margin-bottom:12px"><a href="${req.session.admin ? '/admin/invoices' : '/cabinet'}">← ${esc(t('back'))}</a>
-    <span style="margin-left:auto">${inv.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</span>
+    ${waClient(req, inv)}<span style="margin-left:auto">${inv.paid ? `<span class="badge b-arrived">${esc(t('paid'))}</span>` : `<span class="badge b-border">${esc(t('unpaid'))}</span>`}</span>
     <button type="button" class="sec" onclick="print()" style="flex:0 0 auto">${esc(t('print'))}</button></div>
   <p class="muted only-m noprint" style="font-size:13px;margin:0 0 8px">${esc(t('inv_zoom_hint'))}</p>
   <div class="wb-fit"><div class="wb wb-sheet">
