@@ -715,16 +715,18 @@ const IMPORT_COLS = {
 
 app.get('/admin/import', (req, res) => {
   const t = req.t;
-  adminRender(req, res, t('a_import'), `<div class="card" id="inv"><h2>${esc(t('a_inv_import'))}</h2><p class="muted">${esc(t('a_inv_import_hint'))}</p>
-    <form method="post" action="/admin/import-invoices" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div>
+  // Одна форма: ежедневная таблица склада → накладные и отслеживание сразу. Остальное спрятано в «Дополнительно».
+  adminRender(req, res, t('a_import'), `<div class="card" id="inv"><h2>${esc(t('a_one_title'))}</h2><p class="muted">${esc(t('a_one_hint'))}</p>
+    <form method="post" action="/admin/import-invoices" enctype="multipart/form-data"><input type="file" name="file" accept=".xlsx,.xls,.csv" required style="margin-bottom:12px">
+    <button class="wide">${esc(t('a_upload'))}</button>
+    <details style="margin-top:12px"><summary class="muted">${esc(t('a_more'))}</summary><div class="row" style="margin-top:8px">
     <div><label>${esc(t('a_inv_default_date'))}</label><input type="date" name="inv_date" value="${new Date().toISOString().slice(0, 10)}"></div>
-    <div><label>始发地 · Пункт вылета</label><select name="origin">${activeWarehouses().map((x) => `<option>${esc(`${x.name_zh}/${x.name_ru}`)}</option>`).join('')}</select></div>
-    <button>${esc(t('a_upload'))}</button></form>
-    <p><a href="/admin/invoice-template.xlsx">${esc(t('a_template'))}</a></p></div>
-    <div class="card"><h2>${esc(t('a_import'))}</h2><p class="muted">${esc(t('a_import_hint'))}</p>
+    <div><label>始发地 · Пункт вылета</label><select name="origin">${activeWarehouses().map((x) => `<option>${esc(`${x.name_zh}/${x.name_ru}`)}</option>`).join('')}</select></div></div>
+    <p class="muted" style="font-size:14px">${esc(t('a_inv_import_hint'))} <a href="/admin/invoice-template.xlsx">${esc(t('a_template'))}</a></p></details></form></div>
+    <details class="card"><summary class="muted">${esc(t('a_parcels_import'))}</summary><p class="muted">${esc(t('a_import_hint'))}</p>
     <form method="post" action="/admin/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div>
     <div><label>${esc(t('status'))}</label><select name="default_status">${statusOptions(t, 'china')}</select></div><button>${esc(t('a_upload'))}</button></form>
-    <p><a href="/admin/template.xlsx">${esc(t('a_template'))}</a></p></div>`);
+    <p><a href="/admin/template.xlsx">${esc(t('a_template'))}</a></p></details>`);
 });
 
 app.get('/admin/template.xlsx', (req, res) => {
