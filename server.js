@@ -674,7 +674,7 @@ app.use('/admin', (req, res, next) => {
 });
 
 app.get('/admin', (req, res) => {
-  const t = req.t; const m = canMoney(req);
+  const t = req.t; const m = isOwner(req); // деньги в сводке видит только владелец
   const c = (sql) => db.prepare(sql).get().c;
   // Сводка за сегодня и за месяц (по Алматы): отправлено, прибыло, выдано, начислено, получено денег, новые клиенты.
   const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10); const month = today.slice(0, 7);
@@ -718,7 +718,8 @@ app.get('/admin', (req, res) => {
   const hero = `<div class="dhero"><div class="dhero-main">${m
     ? `<div class="lb">💵 ${esc(t('a_d_got_today'))} · ${esc(fmtDay(today))}</div><div class="huge">${esc(money(td.got))}</div><div class="mo">${esc(t('a_this_month'))}: <b>${esc(money(mo.got))}</b> ${chip(cur.got, prev.got)}</div>`
     : `<div class="lb">🚚 ${esc(t('a_d_sent_today'))} · ${esc(fmtDay(today))}</div><div class="huge">${td.sent.n}</div><div class="mo">${esc(tons(td.sent.w))} · ${esc(m3(td.sent.v))}</div>`}</div>
-    <div class="dhero-nums"><a href="/admin/invoices"><small>🚚 ${esc(t('a_d_sent_today'))}</small><b>${td.sent.n}</b><small>${esc(tons(td.sent.w))}</small></a>
+    <div class="dhero-nums">${m ? `<a href="/admin/invoices"><small>🚚 ${esc(t('a_d_sent_today'))}</small><b>${td.sent.n}</b><small>${esc(tons(td.sent.w))}</small></a>`
+      : `<a href="/admin/invoices?st=arrived"><small>🏁 ${esc(t('a_d_arrived_today'))}</small><b>${td.arrived}</b><small>${esc(t('a_h_delivered'))}: ${td.delivered}</small></a>`}
     <a href="/admin/invoices?st=arrived"><small>🏬 ${esc(t('a_d_in_wh'))}</small><b class="${alarm.length ? 'bad' : ''}">${lying.length}</b><small>${alarm.length ? `🔔 ${alarm.length} · ${LYING_ALARM}+ ${esc(t('a_days'))}` : esc(t('a_d_all_ok'))}</small></a>
     ${m ? `<a href="/admin/debts"><small>💳 ${esc(t('a_d_wait_pay'))}</small><b>${esc(money(debtAll))}</b><small>${unpaid} ${esc(t('a_d_invs'))}</small></a>`
       : `<a href="/admin/parcels?nc=1"><small>📦 ${esc(t('a_nc_title'))}</small><b>${nc}</b><small>${esc(t('a_total_parcels'))}: ${c('SELECT COUNT(*) c FROM parcels')}</small></a>`}</div></div>
