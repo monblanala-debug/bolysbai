@@ -274,6 +274,7 @@ app.get('/track', (req, res) => {
         ${invTimeline(t, i)}
         <div class="muted">${esc(t('inv_sent'))}: ${esc(fmtDay(i.inv_date || i.created_at))}${i.origin || i.destination ? ` · ${esc(i.origin)} → ${esc(i.destination)}` : ''}</div>
         <div class="muted">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}</div>
+        ${(() => { const ph = invoicePhotos(i.id); return ph.length ? `<div class="thumbs" style="margin-top:8px">${ph.map((f) => `<a href="/photo/${esc(f.file)}" target="_blank"><img src="/photo/${esc(f.file)}" loading="lazy" alt=""></a>`).join('')}</div>` : ''; })()}
         <p style="margin:10px 0 0"><a class="btn sec sm" href="/invoice/${i.id}">${esc(t('inv_view'))}</a></p></div>`;
   const client = req.session.clientId && getClient(req.session.clientId);
   if (tracks.length) {
