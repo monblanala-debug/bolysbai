@@ -16,7 +16,7 @@ DATA_DIR=/var/lib/cargo151
 ENV_FILE=/etc/cargo151.env
 
 apt-get update
-apt-get install -y curl git nginx rsync
+apt-get install -y curl git nginx rsync ffmpeg
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 22 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs

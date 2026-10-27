@@ -39,12 +39,40 @@ const PHOTO_DIR = process.env.PHOTO_DIR || require('path').join(require('path').
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
 // Скриншоты отзывов лежат рядом с базой; при первом запуске копируем стартовые из reviews-seed.
 const REVIEW_DIR = require('path').join(require('path').dirname(PHOTO_DIR), 'reviews');
-if (!fs.existsSync(REVIEW_DIR)) {
-  fs.mkdirSync(REVIEW_DIR, { recursive: true });
-  const seed = require('path').join(__dirname, 'reviews-seed');
-  for (const f of fs.existsSync(seed) ? fs.readdirSync(seed) : []) if (/^\d+\.jpg$/.test(f)) fs.copyFileSync(require('path').join(seed, f), require('path').join(REVIEW_DIR, `s${f}`));
+{
+  const fresh = !fs.existsSync(REVIEW_DIR); fs.mkdirSync(REVIEW_DIR, { recursive: true });
+  const seed = require('path').join(__dirname, 'reviews-seed'); const rp = (f) => require('path').join(REVIEW_DIR, f);
+  // Отзыв копируем только в новую папку (удалённые не возвращаем), а превью — к тем, что остались.
+  for (const f of fs.existsSync(seed) ? fs.readdirSync(seed) : []) {
+    const m = /^(\d+)(_t)?\.jpg$/.exec(f); if (!m) continue;
+    if (m[2] ? fs.existsSync(rp(`s${m[1]}.jpg`)) && !fs.existsSync(rp(`s${f}`)) : fresh) fs.copyFileSync(require('path').join(seed, f), rp(`s${f}`));
+  }
 }
 const REVIEW_RE = /^(s\d+|u\d+-[a-f0-9]{8})\.(jpg|png|webp)$/;
+// Видеоотзывы: v<время>-<hex>.mp4 и обложка _t.jpg. Пока ffmpeg пережимает загрузку, в имени стоит -raw.
+const VIDEO_RE = /^v\d+-[a-f0-9]{8}\.(mp4|mov|webm)$/;
+const videoFiles = () => fs.readdirSync(REVIEW_DIR).filter((f) => VIDEO_RE.test(f)).sort().reverse();
+const videoPending = () => fs.readdirSync(REVIEW_DIR).filter((f) => /^v\d+-[a-f0-9]{8}-raw\./.test(f)).length;
+const videoUpload = multer({ storage: multer.diskStorage({ destination: REVIEW_DIR,
+  filename: (req, f, cb) => cb(null, `v${Date.now()}-${crypto.randomBytes(4).toString('hex')}-raw.${(/\.(mp4|mov|webm)$/i.exec(f.originalname) || [, 'mp4'])[1].toLowerCase()}`) }),
+  limits: { fileSize: 300 * 1024 * 1024, files: 5 }, fileFilter: (req, f, cb) => cb(null, /^video\//.test(f.mimetype)) });
+// Пережимаем в лёгкий mp4 720p, который открывается сразу (faststart) на любом телефоне, и делаем обложку.
+// Нет ffmpeg на сервере — оставляем файл как есть.
+function processVideo(raw) {
+  const rp = (f) => require('path').join(REVIEW_DIR, f); const base = raw.replace(/-raw\.\w+$/, '');
+  const keep = () => { try { fs.renameSync(rp(raw), rp(`${base}.${raw.split('.').pop()}`)); } catch {} };
+  const { execFile } = require('child_process');
+  execFile('ffmpeg', ['-y', '-v', 'error', '-i', rp(raw), '-vf', "scale='min(720,iw)':-2", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '27', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', rp(`${base}.tmp.mp4`)], { timeout: 15 * 60 * 1000 }, (err) => {
+    if (err) { try { fs.unlinkSync(rp(`${base}.tmp.mp4`)); } catch {} return keep(); }
+    execFile('ffmpeg', ['-y', '-v', 'error', '-ss', '1', '-i', rp(`${base}.tmp.mp4`), '-frames:v', '1', '-vf', 'scale=360:-2', '-q:v', '5', rp(`${base}_t.jpg`)], () => {
+      fs.renameSync(rp(`${base}.tmp.mp4`), rp(`${base}.mp4`)); try { fs.unlinkSync(rp(raw)); } catch {}
+    });
+  });
+}
+// Если сервер перезапустили во время обработки — доделываем.
+for (const f of fs.readdirSync(REVIEW_DIR)) { if (/\.tmp\.mp4$/.test(f)) fs.unlinkSync(require('path').join(REVIEW_DIR, f)); else if (/^v\d+-[a-f0-9]{8}-raw\./.test(f)) processVideo(f); }
+// Лёгкое превью для плитки: <имя>_t.jpg, если его нет — сам скриншот.
+const reviewThumb = (f) => { const t = f.replace(/\.\w+$/, '_t.jpg'); return fs.existsSync(require('path').join(REVIEW_DIR, t)) ? t : f; };
 // Новые загрузки — сверху, стартовые — в исходном порядке.
 const reviewFiles = () => fs.readdirSync(REVIEW_DIR).filter((f) => REVIEW_RE.test(f))
   .sort((a, b) => (a[0] !== b[0] ? (a[0] === 'u' ? -1 : 1) : a[0] === 'u' ? b.localeCompare(a) : a.localeCompare(b)));
@@ -160,21 +188,24 @@ for (const [path, key] of [['/about', 'about'], ['/services', 'services'], ['/in
 }
 
 app.get('/reviews', (req, res) => {
-  const t = req.t; const wa = setting('whatsapp'); const files = reviewFiles();
+  const t = req.t; const wa = setting('whatsapp'); const files = reviewFiles(); const videos = videoFiles();
   res.render(t('nav_reviews'), `<div class="iv narrow rv"><div class="iv-hero"><h1>${esc(t('nav_reviews'))}</h1><small>${esc(t('reviews_sub'))}</small></div>
-    <div class="rv-grid">${files.map((f, i) => `<a href="/review/${f}" data-i="${i}"><img src="/review/${f}" loading="${i < 4 ? 'eager' : 'lazy'}" alt="${esc(t('nav_reviews'))} ${i + 1}"></a>`).join('')}</div>
+    <div class="rv-grid">${files.map((f, i) => `<a href="/review/${f}"><img src="/review/${reviewThumb(f)}" width="360" height="480" loading="${i < 6 ? 'eager' : 'lazy'}" decoding="async" alt="${esc(t('nav_reviews'))} ${i + 1}"></a>`).join('')}</div>
+    ${videos.length ? `<h2 class="rv-h">🎬 ${esc(t('reviews_video'))}</h2><div class="rv-grid rv-v">${videos.map((f) => { const p = reviewThumb(f); return `<video controls playsinline preload="${p === f ? 'metadata' : 'none'}"${p === f ? '' : ` poster="/review/${p}"`} src="/review/${f}"></video>`; }).join('')}</div>` : ''}
     ${wa ? `<p style="text-align:center"><a class="btn" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener">${esc(t('write_wa'))}</a></p>` : ''}</div>
     <div class="rv-box" hidden><button class="rv-x" aria-label="✕">✕</button><button class="rv-p" aria-label="‹">‹</button><img alt=""><button class="rv-n" aria-label="›">›</button></div>
-    <script>(()=>{const a=[...document.querySelectorAll('.rv-grid a')],b=document.querySelector('.rv-box'),im=b.querySelector('img');let i=0,x=0;
-    const show=(k)=>{i=(k+a.length)%a.length;im.src=a[i].href;b.hidden=false;document.body.style.overflow='hidden'};const hide=()=>{b.hidden=true;document.body.style.overflow=''};
+    <script>(()=>{document.addEventListener('play',(e)=>document.querySelectorAll('video').forEach((v)=>{if(v!==e.target)v.pause()}),true);const a=[...document.querySelectorAll('.rv-grid a')],b=document.querySelector('.rv-box'),im=b.querySelector('img');let i=0,x=0;
+    const pre=(k)=>{new Image().src=a[(k+a.length)%a.length].href};
+    const show=(k)=>{i=(k+a.length)%a.length;const n=i,full=new Image();im.src=a[i].querySelector('img').src;full.onload=()=>{if(n===i)im.src=full.src};full.src=a[i].href;b.hidden=false;document.body.style.overflow='hidden';pre(i+1);pre(i-1)};
+    a.forEach((el)=>{el.addEventListener('touchstart',()=>pre(a.indexOf(el)),{passive:true});el.onmouseenter=()=>pre(a.indexOf(el))});const hide=()=>{b.hidden=true;document.body.style.overflow=''};
     a.forEach((el,k)=>el.onclick=(e)=>{e.preventDefault();show(k)});b.querySelector('.rv-x').onclick=hide;b.querySelector('.rv-p').onclick=()=>show(i-1);b.querySelector('.rv-n').onclick=()=>show(i+1);
     b.onclick=(e)=>{if(e.target===b)hide()};document.onkeydown=(e)=>{if(b.hidden)return;if(e.key==='Escape')hide();if(e.key==='ArrowLeft')show(i-1);if(e.key==='ArrowRight')show(i+1)};
     b.ontouchstart=(e)=>{x=e.touches[0].clientX};b.ontouchend=(e)=>{const d=e.changedTouches[0].clientX-x;if(Math.abs(d)>50)show(i+(d<0?1:-1))}})()</script>`);
 });
 app.get('/review/:file', (req, res) => {
   const f = String(req.params.file);
-  if (!REVIEW_RE.test(f) || !fs.existsSync(require('path').join(REVIEW_DIR, f))) return res.sendStatus(404);
-  res.sendFile(require('path').join(REVIEW_DIR, f), { maxAge: '30d' });
+  if (!(REVIEW_RE.test(f.replace(/_t\.jpg$/, '.jpg')) || VIDEO_RE.test(f) || VIDEO_RE.test(f.replace(/_t\.jpg$/, '.mp4'))) || !fs.existsSync(require('path').join(REVIEW_DIR, f))) return res.sendStatus(404);
+  res.sendFile(require('path').join(REVIEW_DIR, f), { maxAge: '365d', immutable: true });
 });
 
 app.get('/', (req, res) => {
@@ -1885,20 +1916,40 @@ app.get('/admin/settings', (req, res) => {
       <p><button>${esc(t('s_staff_add'))}</button></p></form>
     <div class="hint">${ROLES.map((r) => `<div><b>${esc(t('role_' + r))}:</b> ${esc(t('access_' + r))}</div>`).join('')}</div></div>
     <div class="card" id="reviews"><h2>⭐ ${esc(t('nav_reviews'))}</h2><p class="muted">${esc(t('s_reviews_hint'))} <a href="/reviews" target="_blank">/reviews</a></p>
-    <form method="post" action="/admin/settings/reviews" enctype="multipart/form-data"><label class="btn sec" style="cursor:pointer">📷 ${esc(t('s_reviews_add'))}<input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="this.form.submit()"></label></form>
-    <div class="photos">${reviewFiles().map((f) => `<div style="position:relative;display:inline-block"><a href="/review/${f}" target="_blank"><img src="/review/${f}" loading="lazy" alt=""></a>
+    <form method="post" action="/admin/settings/reviews" enctype="multipart/form-data" id="rvf"><label class="btn sec" style="cursor:pointer">📷 ${esc(t('s_reviews_add'))}<input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple hidden></label></form>
+    <script>(()=>{const f=document.getElementById('rvf'),inp=f.querySelector('input');
+    // Сжимаем в браузере: скриншот до 900px и превью 360×480, чтобы страница отзывов открывалась быстро.
+    const jpg=(img,w,h,sh)=>new Promise((r)=>{const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,img.width,sh,0,0,w,h);c.toBlob(r,'image/jpeg',.78)});
+    inp.onchange=async()=>{try{const fd=new FormData();for(const file of inp.files){const img=await createImageBitmap(file);const k=Math.min(1,900/img.width);
+      fd.append('photos',await jpg(img,Math.round(img.width*k),Math.round(img.height*k),img.height),'r.jpg');
+      fd.append('thumbs',await jpg(img,360,Math.min(480,Math.round(img.height*360/img.width)),Math.min(img.height,img.width*4/3)),'t.jpg')}
+      await fetch(f.action,{method:'POST',body:fd});location.reload()}catch(e){f.submit()}}})()</script>
+    <div class="photos">${reviewFiles().map((f) => `<div style="position:relative;display:inline-block"><a href="/review/${f}" target="_blank"><img src="/review/${reviewThumb(f)}" loading="lazy" alt=""></a>
+      <form method="post" action="/admin/settings/reviews/del" style="margin:0" onsubmit="return confirm('${esc(t('s_reviews_del'))}?')"><input type="hidden" name="file" value="${f}"><button class="sec sm">✕ ${esc(t('s_reviews_del'))}</button></form></div>`).join('')}</div>
+    <h3>🎬 ${esc(t('reviews_video'))}</h3><p class="muted">${esc(t('s_video_hint'))}</p>
+    <form method="post" action="/admin/settings/reviews/video" enctype="multipart/form-data"><label class="btn sec" style="cursor:pointer">🎬 ${esc(t('s_video_add'))}<input type="file" name="videos" accept="video/*" multiple hidden onchange="this.form.submit();this.closest('label').textContent='⏳ …'"></label></form>
+    ${videoPending() ? `<p class="hint">⏳ ${esc(t('s_video_wait'))}: ${videoPending()}</p>` : ''}
+    <div class="photos">${videoFiles().map((f) => `<div style="position:relative;display:inline-block"><a href="/review/${f}" target="_blank"><img src="/review/${reviewThumb(f) === f ? '' : reviewThumb(f)}" loading="lazy" alt="🎬"></a>
       <form method="post" action="/admin/settings/reviews/del" style="margin:0" onsubmit="return confirm('${esc(t('s_reviews_del'))}?')"><input type="hidden" name="file" value="${f}"><button class="sec sm">✕ ${esc(t('s_reviews_del'))}</button></form></div>`).join('')}</div></div>`);
 });
-app.post('/admin/settings/reviews', photoUpload.array('photos', 10), (req, res) => {
-  for (const f of req.files || []) {
-    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[f.mimetype];
-    if (ext) fs.writeFileSync(require('path').join(REVIEW_DIR, `u${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`), f.buffer);
-  }
+app.post('/admin/settings/reviews', photoUpload.fields([{ name: 'photos', maxCount: 10 }, { name: 'thumbs', maxCount: 10 }]), (req, res) => {
+  const thumbs = (req.files && req.files.thumbs) || [];
+  ((req.files && req.files.photos) || []).forEach((f, i) => {
+    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[f.mimetype]; if (!ext) return;
+    const base = `u${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    fs.writeFileSync(require('path').join(REVIEW_DIR, `${base}.${ext}`), f.buffer);
+    if (thumbs[i] && thumbs[i].mimetype === 'image/jpeg') fs.writeFileSync(require('path').join(REVIEW_DIR, `${base}_t.jpg`), thumbs[i].buffer);
+  });
   res.redirect('/admin/settings#reviews');
 });
+app.post('/admin/settings/reviews/video', (req, res) => videoUpload.array('videos', 5)(req, res, (err) => {
+  if (err) req.session.flash = req.t('s_video_bad');
+  for (const f of req.files || []) processVideo(f.filename);
+  res.redirect('/admin/settings#reviews');
+}));
 app.post('/admin/settings/reviews/del', (req, res) => {
   const f = String(req.body.file || '');
-  if (REVIEW_RE.test(f)) { try { fs.unlinkSync(require('path').join(REVIEW_DIR, f)); } catch {} }
+  if (REVIEW_RE.test(f) || VIDEO_RE.test(f)) for (const x of [f, f.replace(/\.\w+$/, '_t.jpg')]) { try { fs.unlinkSync(require('path').join(REVIEW_DIR, x)); } catch {} }
   res.redirect('/admin/settings#reviews');
 });
 
