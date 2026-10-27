@@ -21,6 +21,15 @@ button,.btn{display:inline-block;background:var(--brand);color:var(--brand-ink);
 .row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.row>*{flex:1;min-width:140px}.row>button,.row>.btn{flex:0 0 auto}
 table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}
 .tbl{overflow-x:auto}.dayrow td{background:#f6f1f1;border-top:2px solid var(--line)}
+.iv p{margin:0 0 10px}.iv ul{margin:0 0 10px;padding:0;list-style:none}.iv li{position:relative;padding:5px 0 5px 28px}
+.iv li:before{content:'';position:absolute;left:4px;top:13px;width:8px;height:8px;border-radius:50%;background:var(--brand)}
+.iv ul.ban li:before{content:'✕';width:auto;height:auto;background:none;color:var(--brand);font-weight:800;top:5px;left:5px}
+.iv-hero{border-radius:18px;padding:22px 20px;margin-bottom:12px;background:linear-gradient(135deg,#e5262d,#a5121a);color:#fff}.iv-hero h1{margin:0;font-size:26px}.iv-hero small{display:block;opacity:.85;margin-top:4px}
+.iv details{background:#fff;border:1px solid var(--line);border-radius:14px;margin-bottom:10px;overflow:hidden}
+.iv summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:12px;padding:15px 16px;font-weight:700;font-size:17px}.iv summary::-webkit-details-marker{display:none}
+.iv summary .ic{font-size:20px}.iv summary:after{content:'+';margin-left:auto;font-size:22px;color:var(--brand);font-weight:400}.iv details[open] summary:after{content:'−'}
+.iv summary:hover{background:#fdf6f6}.iv summary:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}.iv details[open] summary{border-bottom:1px solid var(--line)}.iv .in{padding:14px 16px 6px}
+
 .dchip{display:inline-block;font-size:12px;font-weight:700;padding:1px 7px;border-radius:999px;white-space:nowrap}.dchip.up{background:#dcfce7;color:#166534}.dchip.down{background:#fee2e2;color:#991b1b}.okc{color:var(--ok)}
 .dhero{background:#22191a;color:#fff;border-radius:18px;padding:22px 24px;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,2fr);gap:20px;position:relative;overflow:hidden;margin-bottom:16px}@media(max-width:760px){.dhero{grid-template-columns:minmax(0,1fr);padding:18px}}
 .dhero:before{content:'';position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(229,38,45,.45),transparent 70%)}

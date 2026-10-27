@@ -111,6 +111,7 @@ const promo = (req) => {
 };
 
 // Простая разметка: «# заголовок», «- пункт», остальное — абзацы.
+const { parse: parseInfo, infoPage } = require('./info-view');
 function renderInfo(text) {
   let html = ''; let list = false;
   for (const raw of String(text || '').split('\n')) {
@@ -132,11 +133,9 @@ function renderInfoCards(text) {
 }
 
 app.get('/info', (req, res) => {
-  const t = req.t;
-  const whs = activeWarehouses();
-  res.render(t('nav_info'), `<div class="narrow fade"><div class="card"><h1>${esc(t('nav_info'))}</h1>
-    <h2>${esc(t('hours'))}</h2><ul>${whs.map((w) => `<li><b>${esc(whName(req.lang, w))}</b> — ${esc(req.lang === 'zh' ? w.hours_zh : w.hours_ru)}</li>`).join('')}</ul>
-    ${renderInfo(setting(req.lang === 'zh' ? 'info_zh' : 'info_ru'))}</div></div>`);
+  const t = req.t; const zh = req.lang === 'zh';
+  const hours = { title: t('hours'), blocks: [{ ul: activeWarehouses().map((w) => `${whName(req.lang, w)} — ${zh ? w.hours_zh : w.hours_ru}`) }] };
+  res.render(t('nav_info'), infoPage(t('nav_info'), t('info_sub'), [hours, ...parseInfo(setting(zh ? 'info_zh' : 'info_ru'))]));
 });
 for (const [path, key] of [['/about', 'about'], ['/services', 'services'], ['/insurance', 'insurance']]) {
   app.get(path, (req, res) => {
@@ -144,6 +143,7 @@ for (const [path, key] of [['/about', 'about'], ['/services', 'services'], ['/in
     // С «Услуг» ведём на страховку, со страховки — сразу в WhatsApp.
     const more = key === 'services' ? `<a class="btn sec" href="/insurance">🛡 ${esc(req.t('nav_insurance'))} →</a>`
       : key === 'insurance' && wa ? `<a class="btn" href="https://wa.me/${esc(wa)}?text=${encodeURIComponent(req.t('ins_wa_msg'))}" target="_blank" rel="noopener">${esc(req.t('write_wa'))}</a>` : '';
+    if (key === 'about') return res.render(req.t('nav_about'), infoPage(req.t('nav_about'), req.t('about_sub'), parseInfo(setting(`about_${req.lang === 'zh' ? 'zh' : 'ru'}`))));
     res.render(req.t('nav_' + key), `<div class="narrow fade">${renderInfoCards(setting(`${key}_${req.lang === 'zh' ? 'zh' : 'ru'}`))}${more ? `<p>${more}</p>` : ''}</div>`);
   });
 }
