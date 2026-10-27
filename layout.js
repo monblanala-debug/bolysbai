@@ -24,6 +24,10 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;p
 .iv p{margin:0 0 10px}.iv ul{margin:0 0 10px;padding:0;list-style:none}.iv li{position:relative;padding:5px 0 5px 28px}
 .iv li:before{content:'';position:absolute;left:4px;top:13px;width:8px;height:8px;border-radius:50%;background:var(--brand)}
 .iv ul.ban li:before{content:'✕';width:auto;height:auto;background:none;color:var(--brand);font-weight:800;top:5px;left:5px}
+.rv-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}@media(min-width:700px){.rv-grid{grid-template-columns:repeat(3,1fr);gap:12px}}
+.rv-grid a{display:block;border-radius:12px;overflow:hidden;background:#eee;aspect-ratio:3/4;box-shadow:0 1px 4px rgba(0,0,0,.12)}.rv-grid img{width:100%;height:100%;object-fit:cover;object-position:top;display:block}
+.rv-box{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center}.rv-box[hidden]{display:none}.rv-box img{max-width:100%;max-height:100%;object-fit:contain}
+.rv-box button{position:absolute;background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:50%;width:44px;height:44px;font-size:24px;padding:0;margin:0}.rv-x{top:12px;right:12px}.rv-p{left:8px;top:50%}.rv-n{right:8px;top:50%}
 .iv-hero{border-radius:18px;padding:22px 20px;margin-bottom:12px;background:linear-gradient(135deg,#e5262d,#a5121a);color:#fff}.iv-hero h1{margin:0;font-size:26px}.iv-hero small{display:block;opacity:.85;margin-top:4px}
 .iv details{background:#fff;border:1px solid var(--line);border-radius:14px;margin-bottom:10px;overflow:hidden}
 .iv summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:12px;padding:15px 16px;font-weight:700;font-size:17px}.iv summary::-webkit-details-marker{display:none}
@@ -157,7 +161,7 @@ function page({ title, body, t, lang, path, session, whatsapp }) {
   const waPretty = wa.length === 13 ? `+${wa.slice(0, 2)} ${wa.slice(2, 5)} ${wa.slice(5, 9)} ${wa.slice(9)}` : `+${wa}`;
   // Клиент уже вошёл — «Получить код» ему не нужен, вместо него адрес склада в Китае.
   const first = session && session.clientId ? ['/address', 'china_address'] : ['/', 'nav_home'];
-  const navItems = [first, ['/track', 'nav_track'], ['/cabinet', 'nav_cabinet'], ['/services', 'nav_services'], ['/about', 'nav_about'], ['/info', 'nav_info']];
+  const navItems = [first, ['/track', 'nav_track'], ['/cabinet', 'nav_cabinet'], ['/services', 'nav_services'], ['/about', 'nav_about'], ['/reviews', 'nav_reviews'], ['/info', 'nav_info']];
   const isOn = (href) => (href === '/' ? ['/', '/code', '/address'].includes(path) : path.startsWith(href) || (href === '/cabinet' && path.startsWith('/invoice')));
   const nav = navItems.map(([href, k]) => `<a href="${href}" class="${isOn(href) ? 'on' : ''}">${esc(t(k))}</a>`).join('');
   const logout = session && (session.clientId || session.admin) ? `<a href="/logout">${esc(t('nav_logout'))}</a>` : '';

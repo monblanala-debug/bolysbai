@@ -37,6 +37,17 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const fs = require('fs');
 const PHOTO_DIR = process.env.PHOTO_DIR || require('path').join(require('path').dirname(process.env.DB_PATH || require('path').join(__dirname, 'cargo151.db')), 'photos');
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
+// Скриншоты отзывов лежат рядом с базой; при первом запуске копируем стартовые из reviews-seed.
+const REVIEW_DIR = require('path').join(require('path').dirname(PHOTO_DIR), 'reviews');
+if (!fs.existsSync(REVIEW_DIR)) {
+  fs.mkdirSync(REVIEW_DIR, { recursive: true });
+  const seed = require('path').join(__dirname, 'reviews-seed');
+  for (const f of fs.existsSync(seed) ? fs.readdirSync(seed) : []) if (/^\d+\.jpg$/.test(f)) fs.copyFileSync(require('path').join(seed, f), require('path').join(REVIEW_DIR, `s${f}`));
+}
+const REVIEW_RE = /^(s\d+|u\d+-[a-f0-9]{8})\.(jpg|png|webp)$/;
+// Новые загрузки — сверху, стартовые — в исходном порядке.
+const reviewFiles = () => fs.readdirSync(REVIEW_DIR).filter((f) => REVIEW_RE.test(f))
+  .sort((a, b) => (a[0] !== b[0] ? (a[0] === 'u' ? -1 : 1) : a[0] === 'u' ? b.localeCompare(a) : a.localeCompare(b)));
 // Файл сканера с фото в ячейках бывает большим.
 const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
@@ -147,6 +158,24 @@ for (const [path, key] of [['/about', 'about'], ['/services', 'services'], ['/in
     res.render(req.t('nav_' + key), `<div class="narrow fade">${renderInfoCards(setting(`${key}_${req.lang === 'zh' ? 'zh' : 'ru'}`))}${more ? `<p>${more}</p>` : ''}</div>`);
   });
 }
+
+app.get('/reviews', (req, res) => {
+  const t = req.t; const wa = setting('whatsapp'); const files = reviewFiles();
+  res.render(t('nav_reviews'), `<div class="iv narrow rv"><div class="iv-hero"><h1>${esc(t('nav_reviews'))}</h1><small>${esc(t('reviews_sub'))}</small></div>
+    <div class="rv-grid">${files.map((f, i) => `<a href="/review/${f}" data-i="${i}"><img src="/review/${f}" loading="${i < 4 ? 'eager' : 'lazy'}" alt="${esc(t('nav_reviews'))} ${i + 1}"></a>`).join('')}</div>
+    ${wa ? `<p style="text-align:center"><a class="btn" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener">${esc(t('write_wa'))}</a></p>` : ''}</div>
+    <div class="rv-box" hidden><button class="rv-x" aria-label="✕">✕</button><button class="rv-p" aria-label="‹">‹</button><img alt=""><button class="rv-n" aria-label="›">›</button></div>
+    <script>(()=>{const a=[...document.querySelectorAll('.rv-grid a')],b=document.querySelector('.rv-box'),im=b.querySelector('img');let i=0,x=0;
+    const show=(k)=>{i=(k+a.length)%a.length;im.src=a[i].href;b.hidden=false;document.body.style.overflow='hidden'};const hide=()=>{b.hidden=true;document.body.style.overflow=''};
+    a.forEach((el,k)=>el.onclick=(e)=>{e.preventDefault();show(k)});b.querySelector('.rv-x').onclick=hide;b.querySelector('.rv-p').onclick=()=>show(i-1);b.querySelector('.rv-n').onclick=()=>show(i+1);
+    b.onclick=(e)=>{if(e.target===b)hide()};document.onkeydown=(e)=>{if(b.hidden)return;if(e.key==='Escape')hide();if(e.key==='ArrowLeft')show(i-1);if(e.key==='ArrowRight')show(i+1)};
+    b.ontouchstart=(e)=>{x=e.touches[0].clientX};b.ontouchend=(e)=>{const d=e.changedTouches[0].clientX-x;if(Math.abs(d)>50)show(i+(d<0?1:-1))}})()</script>`);
+});
+app.get('/review/:file', (req, res) => {
+  const f = String(req.params.file);
+  if (!REVIEW_RE.test(f) || !fs.existsSync(require('path').join(REVIEW_DIR, f))) return res.sendStatus(404);
+  res.sendFile(require('path').join(REVIEW_DIR, f), { maxAge: '30d' });
+});
 
 app.get('/', (req, res) => {
   // Клиент уже вошёл — регистрация ему не нужна, сразу в кабинет.
@@ -1854,7 +1883,23 @@ app.get('/admin/settings', (req, res) => {
       <div class="row"><div><label>${esc(t('s_role'))}</label><select name="role">${ROLES.filter((r) => r !== 'owner').map((r) => `<option value="${r}">${esc(t('role_' + r))}</option>`).join('')}</select></div>
       <div><label>${esc(t('password'))}</label><input name="pw" required minlength="6" type="text" autocomplete="off"></div></div>
       <p><button>${esc(t('s_staff_add'))}</button></p></form>
-    <div class="hint">${ROLES.map((r) => `<div><b>${esc(t('role_' + r))}:</b> ${esc(t('access_' + r))}</div>`).join('')}</div></div>`);
+    <div class="hint">${ROLES.map((r) => `<div><b>${esc(t('role_' + r))}:</b> ${esc(t('access_' + r))}</div>`).join('')}</div></div>
+    <div class="card" id="reviews"><h2>⭐ ${esc(t('nav_reviews'))}</h2><p class="muted">${esc(t('s_reviews_hint'))} <a href="/reviews" target="_blank">/reviews</a></p>
+    <form method="post" action="/admin/settings/reviews" enctype="multipart/form-data"><label class="btn sec" style="cursor:pointer">📷 ${esc(t('s_reviews_add'))}<input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="this.form.submit()"></label></form>
+    <div class="photos">${reviewFiles().map((f) => `<div style="position:relative;display:inline-block"><a href="/review/${f}" target="_blank"><img src="/review/${f}" loading="lazy" alt=""></a>
+      <form method="post" action="/admin/settings/reviews/del" style="margin:0" onsubmit="return confirm('${esc(t('s_reviews_del'))}?')"><input type="hidden" name="file" value="${f}"><button class="sec sm">✕ ${esc(t('s_reviews_del'))}</button></form></div>`).join('')}</div></div>`);
+});
+app.post('/admin/settings/reviews', photoUpload.array('photos', 10), (req, res) => {
+  for (const f of req.files || []) {
+    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[f.mimetype];
+    if (ext) fs.writeFileSync(require('path').join(REVIEW_DIR, `u${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`), f.buffer);
+  }
+  res.redirect('/admin/settings#reviews');
+});
+app.post('/admin/settings/reviews/del', (req, res) => {
+  const f = String(req.body.file || '');
+  if (REVIEW_RE.test(f)) { try { fs.unlinkSync(require('path').join(REVIEW_DIR, f)); } catch {} }
+  res.redirect('/admin/settings#reviews');
 });
 
 app.post('/admin/settings/staff', (req, res) => {
