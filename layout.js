@@ -11,7 +11,7 @@ header nav{display:flex;gap:14px;flex-wrap:wrap;flex:1}header nav a{color:var(--
 main{max-width:1100px;margin:0 auto;padding:24px 16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}
 h1{font-size:26px;margin:0 0 8px}h2{font-size:20px;margin:0 0 12px}h3{font-size:16px;margin:0 0 8px}
-.muted{color:var(--muted)}.grid{display:grid;gap:16px}.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.g4{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.muted{color:var(--muted)}.grid{display:grid;gap:16px}.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.g4{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}.staff-note{background:#fff7d6;border-left:3px solid #f59e0b;border-radius:6px;padding:4px 8px;margin-top:4px;font-size:13px;color:#5b4300;white-space:pre-wrap}.sumgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}.sumgrid>div{display:flex;flex-direction:column;gap:2px}.sumgrid b{font-size:22px}
 label{display:block;font-size:14px;font-weight:600;margin:10px 0 4px}
 input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}
 textarea{min-height:90px}

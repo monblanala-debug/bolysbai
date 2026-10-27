@@ -104,6 +104,27 @@ CREATE TABLE IF NOT EXISTS parcel_photos (
   file TEXT NOT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 );
+-- Оплаты по накладной: можно частями. method 'auto' — остаток, записанный кнопкой «Оплачено».
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+  amount REAL NOT NULL,
+  method TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  staff TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS payments_inv ON payments(invoice_id);
+-- Журнал: кто и что сделал в админке.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY,
+  at TEXT DEFAULT (datetime('now')),
+  staff TEXT DEFAULT '',
+  role TEXT DEFAULT '',
+  action TEXT NOT NULL,
+  target TEXT DEFAULT '',
+  detail TEXT DEFAULT ''
+);
 `);
 
 // Колонки, добавленные после первой версии: досоздаём в старых базах.
@@ -135,9 +156,19 @@ for (const [table, col, def] of [
   ['invoices', 'pieces', 'INTEGER DEFAULT 0'],
   ...['volume', 'freight', 'goods_value', 'ins_rate', 'ins_fee', 'pack_fee', 'advance', 'unload_fee', 'other_fee']
     .map((c) => ['invoices', c, 'REAL DEFAULT 0']),
+  // Заметки для сотрудников (клиент не видит) и когда груз прибыл / выдан — для сводки.
+  ['clients', 'note', "TEXT DEFAULT ''"],
+  ['invoices', 'staff_note', "TEXT DEFAULT ''"],
+  ['invoices', 'arrived_at', 'TEXT'],
+  ['invoices', 'delivered_at', 'TEXT'],
 ]) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+// Дата прибытия и выдачи ставится сама, когда статус накладной становится «Прибыло» / «Выдано».
+for (const ev of ['INSERT', 'UPDATE OF inv_status']) {
+  db.exec(`CREATE TRIGGER IF NOT EXISTS inv_stage_${ev.split(' ')[0].toLowerCase()} AFTER ${ev} ON invoices WHEN NEW.inv_status IN ('arrived', 'delivered') BEGIN
+    UPDATE invoices SET arrived_at = COALESCE(arrived_at, datetime('now')), delivered_at = CASE WHEN NEW.inv_status = 'delivered' THEN COALESCE(delivered_at, datetime('now')) ELSE delivered_at END WHERE id = NEW.id; END`);
 }
 
 const STATUSES = {
