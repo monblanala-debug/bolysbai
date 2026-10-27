@@ -455,7 +455,7 @@ app.get('/cabinet', (req, res) => {
   res.render(t('nav_cabinet'), `<div class="card"><div class="row" style="align-items:center"><div><div class="muted">${esc(client.name)}, ${esc(t('your_code_is'))}</div>
     <div class="code" data-flip>${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div></div>
     <a class="btn sec" href="/address" style="flex:0 0 auto">${esc(t('china_address'))}</a></div></div>${newsBlock(req)}${promo(req)}
-    <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoices.some((i) => !i.paid) ? `<div class="alert info">💵 ${esc(t('pay_info'))}</div>` : ''}${invoicesTable(t, invoices, '/invoice/')}</div>
+    <div class="card"><h2>${esc(t('my_invoices'))}</h2>${invoicesTable(t, invoices, '/invoice/')}</div>
     ${myParcels(req, client)}
 `);
 });
@@ -571,7 +571,6 @@ function invoicePage(req, inv) {
   ${forwardCard(req, inv)}
   <div class="wb wb-rules"><div class="rh">承运、托运双方特别约定事项 · Замечание</div>
       ${rules.map((l, i) => (i === 0 && !/^\d/.test(l) ? `<p><b>${esc(l)}</b></p>` : `<p>${esc(l)}</p>`)).join('')}</div>
-  ${inv.paid ? '' : `<div class="alert info noprint">💵 ${esc(t('pay_info'))}</div>`}
   <p class="muted" style="font-size:13px">${esc(t('inv_rules_agree'))} <a href="/insurance">🛡 ${esc(t('nav_insurance'))}</a></p>
   <style>@page{size:A4 landscape;margin:10mm}</style>
   <script>// Накладная всегда как бумажный лист в альбомной ориентации: на узком экране уменьшаем её целиком.
