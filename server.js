@@ -298,6 +298,10 @@ function setPaid(req, id, v) {
 }
 // Заметка о клиенте для сотрудников: видна рядом с клиентом везде в админке, клиенту — никогда.
 const noteBy = (t, i) => `${ROLES.includes(i.staff_note_by) ? t('role_' + i.staff_note_by) : i.staff_note_by || ''}${i.staff_note_at ? ` · ${utcToAlmaty(i.staff_note_at).slice(5).replace(/^(\d\d)-(\d\d)/, '$2.$1')}` : ''}`;
+// Сколько дней груз лежит на складе после «Прибыло» и его не забрали. С 4-го дня — тревога.
+const LYING_ALARM = 4;
+const lyingDays = (i) => (i.arrived_at && invStage(i) === 'arrived' ? almatyDay(new Date()) - almatyDay(new Date(String(i.arrived_at).replace(' ', 'T') + 'Z')) : null);
+const lyingTag = (t, i) => { const d = lyingDays(i); return d === null ? '' : ` <span class="badge" style="background:${d >= LYING_ALARM ? '#fecaca;color:#991b1b' : '#fef3c7;color:#92400e'}">🏬 ${esc(t('a_lying'))} ${d} ${esc(t('a_days'))}</span>`; };
 const noteTag = (note) => (note ? `<div class="staff-note">📝 ${esc(note)}</div>` : '');
 
 // Этапы: пройденные — с датой, текущий выделен, будущие — серые и без дат (сроки не обещаем).
@@ -388,7 +392,7 @@ function invoicesTable(t, invoices, base, withPaid = true, canDelete = false) {
     const cnt = head ? invoices.filter((x) => (x.day || String(x.inv_date || x.created_at || '').slice(0, 10)) === d).length : 0;
     return `${head ? `<tr class="dayrow"><td><input type="checkbox" class="day-all" data-day="${esc(d)}" style="width:auto"></td><td colspan="6"><b>${esc(fmtDay(d))}</b> <span class="muted">· ${cnt} ${esc(t('a_f_pcs'))}</span></td></tr>` : ''}<tr><td><input type="checkbox" name="ids" value="${i.id}" data-day="${esc(d)}" form="bulkinv" style="width:auto"></td><td><b style="white-space:nowrap">${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}${noteTag(i.client_note)}</td>
   <td>${esc(cargoSummary(t, i))}</td><td style="white-space:nowrap"><b>${esc(money(i.amount))}</b></td>
-  <td style="min-width:170px"><div style="margin-bottom:4px">${invBadge(t, i)}</div>
+  <td style="min-width:170px"><div style="margin-bottom:4px">${invBadge(t, i)}${lyingTag(t, i)}</div>
     <form method="post" action="/admin/invoices/${i.id}/status" style="margin-bottom:4px"><input type="hidden" name="back" class="back"><select name="inv_status" onchange="this.form.submit()" class="rowsel" title="${esc(t('a_set_status'))}">${invStatusOptions(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'auto')}</select></form>
     ${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${payBadge(t, i)}${creditBadge(t, i)}</td>
   <td><div style="display:grid;gap:6px"><a class="btn sec sm" href="${base}${i.id}">${esc(t('a_open'))}</a>${withPaid ? `<button type="button" class="sm paybtn" data-id="${i.id}">💵 ${esc(t('a_payments'))}</button>` : ''}${photoForm(t, i.id, '/admin/invoices')}${i.pc ? `<span class="muted">📷 ${i.pc}</span>` : ''}</div></td>
@@ -686,19 +690,46 @@ app.get('/admin', (req, res) => {
       fresh: db.prepare(`SELECT COUNT(*) n FROM clients WHERE ${f("date(created_at, '+5 hours')")} = ?`).get(p).n };
   };
   const debtAll = db.prepare(`SELECT COALESCE(SUM(${DEBT_SQL}), 0) s FROM invoices i`).get().s;
+  // Этот месяц против прошлого за те же дни (1-е … сегодняшнее число), чтобы сравнение было честным.
+  const range = (from, to) => {
+    const q = (sql) => db.prepare(sql).get(from, to);
+    const inv = q(`SELECT COUNT(*) n, COALESCE(SUM(total_weight), 0) w, COALESCE(SUM(volume), 0) v, COALESCE(SUM(amount), 0) a FROM invoices WHERE ${DAY} BETWEEN ? AND ?`);
+    return { n: inv.n, w: inv.w, v: inv.v, a: inv.a, got: q(`SELECT COALESCE(SUM(amount), 0) s FROM payments p WHERE ${PAY_DAY} BETWEEN ? AND ?`).s,
+      fresh: q("SELECT COUNT(*) s FROM clients WHERE date(created_at, '+5 hours') BETWEEN ? AND ?").s };
+  };
+  const dnum = +today.slice(8, 10);
+  const prevM = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7) - 2, 1)).toISOString().slice(0, 7);
+  const prevLast = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7) - 1, 0)).getUTCDate();
+  const cur = range(`${month}-01`, today); const prev = range(`${prevM}-01`, `${prevM}-${String(Math.min(dnum, prevLast)).padStart(2, '0')}`);
+  const arrow = (a, b) => { if (!b) return a ? '<span style="color:var(--ok)">▲</span>' : '<span class="muted">—</span>'; const p = Math.round((a - b) / b * 100);
+    return `<span style="color:${p >= 0 ? 'var(--ok)' : 'var(--brand)'};font-weight:700">${p >= 0 ? '▲' : '▼'} ${Math.abs(p)}%</span>`; };
+  const cmpRows = [['a_rep_invoices', 'n', (v) => v], ['a_h_weight', 'w', (v) => `${num(Math.round(v / 100) / 10)} т`], ['a_h_volume', 'v', (v) => `${num(Math.round(v * 10) / 10)} м³`],
+    ...(canMoney(req) ? [['a_charged', 'a', (v) => money(v)], ['a_sum_got', 'got', (v) => money(v)]] : []), ['a_sum_new_clients', 'fresh', (v) => v]];
+  const cmp = `<div class="card tbl"><h2 style="margin-top:0">${esc(t('a_cmp_title'))}</h2><p class="muted" style="margin-top:-6px">${esc(t('a_cmp_hint').replace('{d}', dnum))}</p>
+    <table><tr><th></th><th>${esc(t('a_this_month'))}</th><th>${esc(t('a_prev_month'))}</th><th></th></tr>
+    ${cmpRows.map(([k, f, fmt]) => `<tr><td>${esc(t(k))}</td><td><b>${esc(fmt(cur[f]))}</b></td><td class="muted">${esc(fmt(prev[f]))}</td><td>${arrow(cur[f], prev[f])}</td></tr>`).join('')}</table></div>`;
+  // Лежат на складе: прибыли, но не выданы. Этап считаем как в списке (с учётом «Авто»).
+  const lying = db.prepare("SELECT * FROM invoices WHERE inv_status = 'arrived'").all().filter((i) => invStage(i) === 'arrived');
+  const lyingBy = lying.reduce((o, i) => { const k = isMsk(i.destination) ? 'Москва' : 'Алматы'; o[k] = (o[k] || 0) + 1; return o; }, {});
+  const oldest = lying.reduce((m, i) => Math.max(m, lyingDays(i) || 0), 0);
+  const alarm = lying.filter((i) => (lyingDays(i) || 0) >= LYING_ALARM);
   const sumCard = (title, o) => `<div class="card"><h2 style="margin-top:0">${esc(title)}</h2><div class="sumgrid">
     <div><span class="muted">${esc(t('a_sum_sent'))}</span><b>${o.sent.n}</b><small class="muted">${esc(num(r2(o.sent.w)))} кг · ${esc(num(r2(o.sent.v)))} м³</small></div>
     <div><span class="muted">${esc(t('ist_arrived'))}</span><b>${o.arrived}</b></div><div><span class="muted">${esc(t('ist_delivered'))}</span><b>${o.delivered}</b></div>
     ${canMoney(req) ? `<div><span class="muted">${esc(t('a_charged'))}</span><b>${esc(money(o.sent.a))}</b></div><div><span class="muted">${esc(t('a_sum_got'))}</span><b style="color:var(--ok)">${esc(money(o.got))}</b></div>` : ''}
     <div><span class="muted">${esc(t('a_sum_new_clients'))}</span><b>${o.fresh}</b></div></div></div>`;
-  adminRender(req, res, t('a_dashboard'), `<div class="grid g2">${sumCard(`${t('a_today')} · ${fmtDay(today)}`, period(today))}${sumCard(`${t('a_this_month')} · ${month.slice(5)}.${month.slice(0, 4)}`, period(month))}</div>
+  adminRender(req, res, t('a_dashboard'), `<a class="card" href="/admin/invoices?st=arrived" style="display:block;${alarm.length ? 'border:2px solid var(--brand);background:#fff5f5' : lying.length ? 'border:2px solid #f59e0b' : ''}"><div class="muted">🏬 ${esc(t('a_lying_title'))}</div>
+    ${alarm.length ? `<div style="color:var(--brand);font-weight:800;font-size:18px;margin:4px 0">🔔 ${esc(t('a_lying_alarm').replace('{n}', alarm.length).replace('{d}', LYING_ALARM))}: ${alarm.map((i) => esc(i.number)).slice(0, 8).join(', ')}${alarm.length > 8 ? '…' : ''}</div>` : ''}
+    <div class="row" style="align-items:baseline;gap:16px"><div class="stat" style="flex:0 0 auto">${lying.length}</div><div style="flex:1 1 auto">${Object.entries(lyingBy).map(([k, n]) => `${esc(k)}: <b>${n}</b>`).join(' · ')}${lying.length ? ` <span class="muted">· ${esc(t('a_lying_oldest'))} ${oldest} ${esc(t('a_days'))}</span>` : ''}</div></div></a>
+    <div class="grid g2">${sumCard(`${t('a_today')} · ${fmtDay(today)}`, period(today))}${sumCard(`${t('a_this_month')} · ${month.slice(5)}.${month.slice(0, 4)}`, period(month))}</div>
+    ${cmp}
     ${canMoney(req) ? `<div class="grid g2"><a class="card" href="/admin/debts" style="display:block"><div class="muted">${esc(t('a_debt_total'))}</div><div class="stat" style="color:var(--brand)">${esc(money(debtAll))}</div></a>
       <a class="card" href="/admin/debts?v=credit" style="display:block"><div class="muted">🤝 ${esc(t('a_credit_total'))}</div><div class="stat" style="color:var(--brand)">${esc(money(db.prepare(`SELECT COALESCE(SUM(${DEBT_SQL}), 0) s FROM invoices i WHERE i.credit = 1`).get().s))}</div></a></div>` : ''}
     <div class="grid g4">
     <div class="card"><div class="muted">${esc(t('a_total_clients'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM clients')}</div></div>
     <div class="card"><div class="muted">${esc(t('a_total_parcels'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM parcels')}</div></div>
     <div class="card"><div class="muted">${esc(t('a_unpaid'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM invoices WHERE paid = 0')}</div></div>
-    <div class="card"><div class="muted">${esc(t('a_no_client'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM parcels WHERE client_id IS NULL')}</div></div></div>
+    <a class="card" href="/admin/parcels?nc=1" style="display:block"><div class="muted">📦 ${esc(t('a_nc_title'))}</div><div class="stat">${c('SELECT COUNT(*) c FROM parcels WHERE client_id IS NULL')}</div></a></div>
     <div class="grid g4">${byStatus}</div>`);
 });
 
@@ -817,19 +848,21 @@ function parcelsTable(req, parcels) {
   const t = req.t;
   if (!parcels.length) return `<p class="muted">${esc(t('no_parcels'))}</p>`;
   return `<form method="post" action="/admin/parcels/bulk"><div class="tbl"><table><tr><th><input type="checkbox" id="checkall" style="width:auto"></th><th>${esc(t('track'))}</th><th>${esc(t('client'))}</th><th>${esc(t('status'))}</th><th>${esc(t('weight'))}</th><th>${esc(t('places'))}</th><th>${esc(t('description'))}</th><th>${esc(t('invoice'))}</th><th>${esc(t('date'))}</th></tr>
-  ${parcels.map((p) => `<tr><td><input type="checkbox" name="ids" value="${p.id}" style="width:auto"></td><td>${esc(p.track)}</td>
+  ${parcels.map((p) => { const ph = db.prepare('SELECT file FROM parcel_photos WHERE parcel_id = ? ORDER BY id LIMIT 1').get(p.id);
+    return `<tr><td><input type="checkbox" name="ids" value="${p.id}" style="width:auto"></td><td>${ph ? `<a href="/photo/${esc(ph.file)}" target="_blank"><img src="/photo/${esc(ph.file)}" loading="lazy" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px;display:block;margin-bottom:4px"></a>` : ''}${esc(p.track)}</td>
   <td>${p.client_id ? `<a href="/admin/clients/${p.client_id}">${esc(p.client_code)}</a>` : `<span class="badge b-border">${esc(p.client_code || t('a_no_client'))}</span>`}</td>
-  <td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td><td>${p.invoice_id ? `<a href="/admin/invoices/${p.invoice_id}">#${p.invoice_id}</a>` : ''}</td><td>${esc(fmtDate(p.updated_at))}</td></tr>`).join('')}
-  </table></div><div class="row" style="margin-top:12px"><div><label>${esc(t('a_bulk_status'))}</label><select name="status">${statusOptions(t)}</select></div>
-  <div><label>${esc(t('note'))}</label><input name="comment"></div><button>${esc(t('apply'))}</button></div>
+  <td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td><td>${p.invoice_id ? `<a href="/admin/invoices/${p.invoice_id}">#${p.invoice_id}</a>` : ''}</td><td>${esc(fmtDate(p.scanned_at || p.updated_at))}</td></tr>`; }).join('')}
+  </table></div><div class="row" style="margin-top:12px;align-items:flex-end"><div><label>${esc(t('a_bulk_status'))}</label><select name="status"><option value="">— ${esc(t('a_no_change'))} —</option>${statusOptions(t)}</select></div>
+  <div><label>${esc(t('note'))}</label><input name="comment"></div><div><label>${esc(t('a_assign_code'))}</label><input name="assign" placeholder="D1600"></div><button>${esc(t('apply'))}</button></div>
   <input type="hidden" name="back" value="${esc(req.originalUrl)}"></form>`;
 }
 
 app.get('/admin/parcels', (req, res) => {
   const t = req.t; const q = String(req.query.q || '').trim(); const st = STATUSES[req.query.status] ? req.query.status : '';
   const like = `%${q}%`;
-  const parcels = db.prepare(`SELECT * FROM parcels WHERE (? = '' OR track LIKE ? OR client_code LIKE ? OR description LIKE ?) AND (? = '' OR status = ?)
-    ORDER BY updated_at DESC LIMIT 500`).all(q, like, like, like, st, st);
+  const nc = req.query.nc === '1';
+  const parcels = db.prepare(`SELECT * FROM parcels WHERE (? = '' OR track LIKE ? OR client_code LIKE ? OR description LIKE ?) AND (? = '' OR status = ?) ${nc ? 'AND client_id IS NULL' : ''}
+    ORDER BY ${nc ? 'COALESCE(scanned_at, updated_at)' : 'updated_at'} DESC LIMIT 500`).all(q, like, like, like, st, st);
   adminRender(req, res, t('a_parcels'), `<div class="card"><h2>${esc(t('a_new_parcel'))}</h2>
     <form method="post" action="/admin/parcels" class="row">
       <div><label>${esc(t('track'))}</label><input name="track" required></div><div><label>${esc(t('code'))}</label><input name="client_code"></div>
@@ -837,7 +870,9 @@ app.get('/admin/parcels', (req, res) => {
       <div><label>${esc(t('description'))}</label><input name="description"></div><div><label>${esc(t('status'))}</label><select name="status">${statusOptions(t, 'china')}</select></div>
       <button>${esc(t('save'))}</button></form></div>
     <div class="card"><form class="row"><div><input name="q" value="${esc(q)}" placeholder="${esc(t('track'))} / ${esc(t('code'))}"></div>
-      <div><select name="status"><option value="">— ${esc(t('status'))} —</option>${statusOptions(t, st)}</select></div><button>${esc(t('search'))}</button></form></div>
+      <div><select name="status"><option value="">— ${esc(t('status'))} —</option>${statusOptions(t, st)}</select></div>
+      <label style="flex:0 0 auto;display:flex;gap:6px;align-items:center"><input type="checkbox" name="nc" value="1" ${nc ? 'checked' : ''} style="width:auto"> ${esc(t('a_nc_title'))}</label><button>${esc(t('search'))}</button></form>
+      ${nc ? `<p class="muted" style="margin:8px 0 0">${esc(t('a_nc_hint'))}</p>` : ''}</div>
     <div class="card">${parcelsTable(req, parcels)}</div>`);
 });
 
@@ -857,6 +892,17 @@ app.post('/admin/parcels/bulk', (req, res) => {
       addEvent(id, status, String(req.body.comment || '').slice(0, 200));
     }
     req.session.flash = `${req.t('saved')}: ${ids.length}`;
+  }
+  // Привязать отмеченные посылки к клиенту по коду — клиент сразу увидит их и фото в «Мои грузы».
+  const code = String(req.body.assign || '').trim();
+  if (code) {
+    const c = findClientByCode(code, true);
+    if (!c) req.session.flash = `${req.t('a_assign_none')}: ${code}`;
+    else {
+      const cl = db.prepare('SELECT code FROM clients WHERE id = ?').get(c.id);
+      for (const id of ids) db.prepare("UPDATE parcels SET client_id = ?, client_code = ?, updated_at = datetime('now') WHERE id = ?").run(c.id, dispCode(cl.code), id);
+      req.session.flash = `${req.t('a_assigned')}: ${ids.length} → ${dispCode(cl.code)}`;
+    }
   }
   const back = String(req.body.back || '/admin/parcels');
   res.redirect(back.startsWith('/admin') ? back : '/admin/parcels');
@@ -1113,6 +1159,8 @@ app.get('/admin/invoices', (req, res) => {
   let invoices = db.prepare(`SELECT i.*, c.code, c.name, c.note client_note, ${DAY} day, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i JOIN clients c ON c.id = i.client_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY day DESC, i.id DESC LIMIT ${filtered ? 2000 : 300}`).all(...args);
   if (f.st) invoices = invoices.filter((i) => { const s = invStage(i); return f.st === 'transit' ? s !== 'arrived' && s !== 'delivered' : s === f.st; });
+  // «Лежат на складе»: сверху те, что лежат дольше всех.
+  if (f.st === 'arrived') invoices.sort((a, b) => String(a.arrived_at || '').localeCompare(String(b.arrived_at || '')));
   const days = db.prepare(`SELECT ${DAY} d, COUNT(*) n FROM invoices i GROUP BY d ORDER BY d DESC LIMIT 90`).all();
   const opt = (v, cur, label) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(label)}</option>`;
   const filter = `<form method="get" class="row" style="align-items:flex-end">
