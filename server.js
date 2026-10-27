@@ -311,7 +311,7 @@ function newsBlock(req) {
 
 // ---------- Личный кабинет ----------
 
-function invoicesTable(t, invoices, base, withPaid = true) {
+function invoicesTable(t, invoices, base, withPaid = true, canDelete = false) {
   if (!invoices.length) return `<p class="muted">${esc(t('no_invoices'))}</p>`;
   // Клиенту — карточками, чтобы на телефоне всё помещалось без прокрутки вбок.
   if (base === '/invoice/') return `<div class="invlist">${invoices.map((i) => `<div class="inv">
@@ -329,7 +329,7 @@ function invoicesTable(t, invoices, base, withPaid = true) {
   <td style="white-space:nowrap"><a class="btn sec sm" href="${base}${i.id}">${esc(t('inv_view'))}</a> ${photoForm(t, i.id, '/admin/invoices')}${i.pc ? ` <span class="muted">📷 ${i.pc}</span>` : ''}</td></tr>`).join('')}</table></div>
   <form method="post" action="/admin/invoices/bulk" id="bulkinv" class="row" style="margin-top:12px"><div><label>${esc(t('a_bulk_inv'))}</label><select name="inv_status">${invStatusOptions(t, 'arrived')}</select></div>
     ${withPaid ? `<div><label>${esc(t('paid'))}</label><select name="paid"><option value="">—</option><option value="1">${esc(t('paid'))}</option><option value="0">${esc(t('unpaid'))}</option></select></div>` : ''}
-    <button>${esc(t('apply'))}</button></form>
+    <button>${esc(t('apply'))}</button>${canDelete ? `<button class="sec" name="del" value="1" onclick="return confirm('${esc(t('a_bulk_del_confirm'))}')">${esc(t('a_bulk_del'))}</button>` : ''}</form>
   <script>document.getElementById('inv-all').addEventListener('change',(e)=>document.querySelectorAll('input[form=bulkinv][name=ids]').forEach((c)=>c.checked=e.target.checked))</script>${PHOTO_JS}`;
 }
 
@@ -909,6 +909,11 @@ function importInvoices(req, res) {
     // Строка заголовков — первая, где есть код клиента или 货号 (сверху может быть шапка).
     let hi = rows.findIndex((r) => r.map(matchInvColumn).some((f) => f === 'code' || f === 'number'));
     let map;
+    // Если почти во всех строках в колонке B номер вида D185-0301-2 — это ежедневная таблица склада, даже если
+    // сверху чужие заголовки (например, данные вставили в шаблон посылок). Читаем по порядку колонок с первой такой строки.
+    const firstNo = rows.findIndex((r) => parseCargoNo(r[1]));
+    const filled = rows.slice(Math.max(firstNo, 0)).filter((r) => String(r[1] ?? '').trim());
+    if (firstNo >= 0 && filled.filter((r) => parseCargoNo(r[1])).length >= filled.length * 0.7) { map = DAILY_LAYOUT; hi = firstNo - 1; } else
     if (hi >= 0) {
       map = rows[hi].map(matchInvColumn);
       if (map.filter((f) => ['total_weight', 'volume', 'rate', 'amount', 'freight'].includes(f)).length < 2 && map[1] === 'number') map = DAILY_LAYOUT;
@@ -934,7 +939,7 @@ app.get('/admin/invoices', (req, res) => {
   const t = req.t;
   const invoices = db.prepare(`SELECT i.*, c.code, c.name, (SELECT COUNT(*) FROM invoice_photos ph WHERE ph.invoice_id = i.id) pc FROM invoices i JOIN clients c ON c.id = i.client_id ORDER BY i.id DESC LIMIT 300`).all();
   adminRender(req, res, t('a_invoices'), `${canMoney(req) ? `<div class="card"><form method="get" action="/admin/invoices/new" class="row"><div><label>${esc(t('a_pick_client'))}</label><input name="code" required placeholder="D1600"></div><button>${esc(t('a_new_invoice'))}</button><a class="btn sec" href="/admin/import#inv">${esc(t('a_inv_import'))}</a></form></div>` : ''}
-  <div class="card">${invoicesTable(t, invoices, '/admin/invoices/', canMoney(req))}</div>`);
+  <div class="card">${invoicesTable(t, invoices, '/admin/invoices/', canMoney(req), isOwner(req))}</div>`);
 });
 
 // Номер накладной: D{код}-{ММДД даты отправки}-{мест}, например D1601-1030-4.
@@ -1052,6 +1057,19 @@ app.post('/admin/invoices/bulk', (req, res) => {
   const ids = [].concat(req.body.ids || []).map((x) => parseInt(x, 10)).filter(Boolean);
   const st = INV_STATUSES.includes(req.body.inv_status) ? req.body.inv_status : null;
   const paid = !canMoney(req) ? null : req.body.paid === '1' ? 1 : req.body.paid === '0' ? 0 : null;
+  // Удалить отмеченные — только владелец (например, неудачную загрузку).
+  if (req.body.del === '1' && isOwner(req)) {
+    db.exec('BEGIN');
+    for (const id of ids) {
+      db.prepare('UPDATE parcels SET invoice_id = NULL WHERE invoice_id = ?').run(id);
+      for (const ph of invoicePhotos(id)) { try { fs.unlinkSync(require('path').join(PHOTO_DIR, ph.file)); } catch {} }
+      db.prepare('DELETE FROM invoice_photos WHERE invoice_id = ?').run(id);
+      db.prepare('DELETE FROM invoices WHERE id = ?').run(id);
+    }
+    db.exec('COMMIT');
+    req.session.flash = `${req.t('a_bulk_deleted')}: ${ids.length}`;
+    return res.redirect('/admin/invoices');
+  }
   db.exec('BEGIN');
   for (const id of ids) db.prepare('UPDATE invoices SET inv_status = COALESCE(?, inv_status), paid = COALESCE(?, paid) WHERE id = ?').run(st, paid, id);
   db.exec('COMMIT');
