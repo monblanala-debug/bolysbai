@@ -118,7 +118,7 @@ const money = (v) => `${(Math.round(v * 100) / 100).toLocaleString('ru-RU')} ${s
 // «26.10 11:10» для приёмки.
 const fmtDT = (s) => (s ? `${String(s).slice(8, 10)}.${String(s).slice(5, 7)} ${String(s).slice(11, 16)}` : '');
 const fmtDate = (s) => (s ? String(s).slice(0, 16).replace('T', ' ') : '');
-// Время из базы хранится по UTC — показываем по Алматы (UTC+5).
+// Время из базы хранится по UTC — показываем по Китаю (UTC+8), как просил владелец.
 const fmtUtc = (s) => (s ? utcToAlmaty(s) : '');
 const activeWarehouses = () => db.prepare('SELECT * FROM warehouses WHERE active = 1 ORDER BY id').all();
 const getClient = (id) => db.prepare(`SELECT c.*, ci.name city_name, ci.pickup_address FROM clients c
@@ -384,8 +384,8 @@ function parcelHistory(t, parcelId) {
 const INV_STAGES = [['sent', 0], ['to_customs', 3], ['at_customs', 5], ['clearing', 7], ['queue', 8], ['arrived'], ['delivered']];
 const INV_STATUSES = ['auto', ...INV_STAGES.map(([k]) => k)];
 const invStatusOptions = (t, sel) => INV_STATUSES.map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(t('ist_' + k))}</option>`).join('');
-// Дни считаем по календарю Алматы (UTC+5).
-const almatyDay = (d) => Math.floor((d.getTime() + 5 * 3600e3) / 86400e3);
+// Дни считаем по календарю Китая (UTC+8).
+const almatyDay = (d) => Math.floor((d.getTime() + 8 * 3600e3) / 86400e3);
 const invStart = (i) => new Date(String(i.created_at || '').replace(' ', 'T') + 'Z');
 function invStage(i) {
   if (INV_STATUSES.includes(i.inv_status) && i.inv_status !== 'auto') return i.inv_status;
@@ -397,8 +397,8 @@ const invBadge = (t, i) => { const s = invStage(i); return `<span class="badge b
 // Принимаем наличными в Алматы и Москве, юанями; переводом — небольшие суммы по договорённости.
 const PAY_METHODS = ['cash_ala', 'cash_msk', 'transfer', 'other'];
 const PAY_KNOWN = [...PAY_METHODS, 'cny', 'auto', 'cash', 'kaspi'];
-// День оплаты: тот, что указала бухгалтер, иначе день записи (по Алматы).
-const PAY_DAY = "COALESCE(p.paid_on, date(p.created_at, '+5 hours'))";
+// День оплаты: тот, что указала бухгалтер, иначе день записи (по Китаю).
+const PAY_DAY = "COALESCE(p.paid_on, date(p.created_at, '+8 hours'))";
 const paidSum = (id) => db.prepare('SELECT COALESCE(SUM(amount), 0) s FROM payments WHERE invoice_id = ?').get(id).s;
 const invDebt = (i) => (i.paid ? 0 : Math.max(0, Math.round(((i.amount || 0) - paidSum(i.id)) * 100) / 100));
 // Долг по накладной i в SQL.
@@ -813,15 +813,15 @@ app.get('/admin', (req, res) => {
   const t = req.t; const m = isOwner(req); // деньги в сводке видит только владелец
   const c = (sql) => db.prepare(sql).get().c;
   // Сводка за сегодня и за месяц (по Алматы): отправлено, прибыло, выдано, начислено, получено денег, новые клиенты.
-  const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10); const month = today.slice(0, 7);
+  const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10); const month = today.slice(0, 7);
   const DAY = "COALESCE(NULLIF(inv_date, ''), substr(created_at, 1, 10))";
   const period = (p) => {
     const f = (col) => (p.length === 7 ? `substr(${col}, 1, 7)` : col);
     const sent = db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(total_weight), 0) w, COALESCE(SUM(volume), 0) v, COALESCE(SUM(amount), 0) a FROM invoices WHERE ${f(DAY)} = ?`).get(p);
-    return { sent, arrived: db.prepare(`SELECT COUNT(*) n FROM invoices WHERE ${f("date(arrived_at, '+5 hours')")} = ?`).get(p).n,
-      delivered: db.prepare(`SELECT COUNT(*) n FROM invoices WHERE ${f("date(delivered_at, '+5 hours')")} = ?`).get(p).n,
+    return { sent, arrived: db.prepare(`SELECT COUNT(*) n FROM invoices WHERE ${f("date(arrived_at, '+8 hours')")} = ?`).get(p).n,
+      delivered: db.prepare(`SELECT COUNT(*) n FROM invoices WHERE ${f("date(delivered_at, '+8 hours')")} = ?`).get(p).n,
       got: db.prepare(`SELECT COALESCE(SUM(amount), 0) s FROM payments p WHERE ${f(PAY_DAY)} = ?`).get(p).s,
-      fresh: db.prepare(`SELECT COUNT(*) n FROM clients WHERE ${f("date(created_at, '+5 hours')")} = ?`).get(p).n };
+      fresh: db.prepare(`SELECT COUNT(*) n FROM clients WHERE ${f("date(created_at, '+8 hours')")} = ?`).get(p).n };
   };
   const td = period(today); const mo = period(month);
   // Этот месяц против прошлого за те же дни (1-е … сегодняшнее число), чтобы сравнение было честным.
@@ -829,7 +829,7 @@ app.get('/admin', (req, res) => {
     const q = (sql) => db.prepare(sql).get(from, to);
     const inv = q(`SELECT COUNT(*) n, COALESCE(SUM(total_weight), 0) w, COALESCE(SUM(volume), 0) v, COALESCE(SUM(amount), 0) a FROM invoices WHERE ${DAY} BETWEEN ? AND ?`);
     return { n: inv.n, w: inv.w, v: inv.v, a: inv.a, got: q(`SELECT COALESCE(SUM(amount), 0) s FROM payments p WHERE ${PAY_DAY} BETWEEN ? AND ?`).s,
-      fresh: q("SELECT COUNT(*) s FROM clients WHERE date(created_at, '+5 hours') BETWEEN ? AND ?").s };
+      fresh: q("SELECT COUNT(*) s FROM clients WHERE date(created_at, '+8 hours') BETWEEN ? AND ?").s };
   };
   const dnum = +today.slice(8, 10);
   const prevM = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7) - 2, 1)).toISOString().slice(0, 7);
@@ -1501,7 +1501,7 @@ app.post('/admin/invoices', (req, res) => {
 
 // Форма оплаты: в накладной и прямо в строке списка (там back — вернуться в список с тем же фильтром).
 function payForm(t, inv, debt, inRow = false) {
-  const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
   const note = `<div style="flex:2 1 200px"><label>${esc(t('note'))}</label><input name="note" maxlength="200" placeholder="${esc(t('a_pay_note_ph'))}"></div>`;
   return `<form method="post" action="/admin/invoices/${inv.id}/payments" class="payform" style="margin-top:${inRow ? 0 : 12}px">${inRow ? '<input type="hidden" name="back" class="back">' : ''}
       <div class="row" style="align-items:flex-end">
@@ -1522,7 +1522,7 @@ function payRow(t, i) {
   const debt = invDebt(i);
   const pays = db.prepare('SELECT * FROM payments WHERE invoice_id = ? ORDER BY id').all(i.id);
   const exps = db.prepare('SELECT * FROM expenses WHERE invoice_id = ? ORDER BY id').all(i.id);
-  const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
   const hist = [...pays.map((p) => `💵 ${fmtDay(p.paid_on || utcToAlmaty(p.created_at).slice(0, 10))} · ${money(p.amount)}${p.currency === 'CNY' ? ` (${num(p.amount_orig)} ¥)` : ''} · ${t('pay_' + (PAY_KNOWN.includes(p.method) ? p.method : 'other'))}${p.note ? ` · ${p.note}` : ''}`),
     ...exps.map((e) => `➖ ${fmtDay(e.spent_on)} · ${t('a_expenses')} ${money(e.amount)}${e.note ? ` · ${e.note}` : ''}`)];
   return `<tr id="pay-${i.id}" class="payrow" hidden><td></td><td colspan="6"><div class="paybox">
@@ -1554,7 +1554,7 @@ app.get('/admin/invoices/:id', (req, res) => {
         ${isOwner(req) ? `<td><form method="post" action="/admin/invoices/${inv.id}/expenses/${e.id}/delete" onsubmit="return confirm('${esc(t('confirm_delete'))}')"><button class="sec sm">✕</button></form></td>` : ''}</tr>`).join('')}</table>` : ''}
       <form method="post" action="/admin/invoices/${inv.id}/expenses" class="row" style="align-items:flex-end;margin-top:8px"><div style="flex:0 1 120px"><label>${esc(t('amount'))}, $</label><input name="amount" inputmode="decimal" required></div>
         <div style="flex:2 1 220px"><label>${esc(t('note'))}</label><input name="note" maxlength="200" placeholder="${esc(t('a_expense_ph'))}"></div>
-        <div style="flex:0 1 170px"><label>${esc(t('date'))}</label><input type="date" name="spent_on" value="${new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10)}"></div><button class="sec" style="flex:0 0 auto">${esc(t('a_expense_add'))}</button></form></details></div>` : '';
+        <div style="flex:0 1 170px"><label>${esc(t('date'))}</label><input type="date" name="spent_on" value="${new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)}"></div><button class="sec" style="flex:0 0 auto">${esc(t('a_expense_add'))}</button></form></details></div>` : '';
   const notes = `<div class="card noprint">${cl.note ? `<div class="staff-note" style="font-size:15px;margin:0 0 10px">📝 <a href="/admin/clients/${cl.id}">${esc(dispCode(cl.code))}</a>: ${esc(cl.note)}</div>` : ''}
     <form method="post" action="/admin/invoices/${inv.id}/note"><label>✎ ${esc(t('a_inv_note'))} <span class="muted" style="font-weight:400">· ${esc(t('a_note_hidden'))}</span></label>
     <textarea name="staff_note" rows="2" placeholder="${esc(t('a_inv_note_ph'))}">${esc(inv.staff_note || '')}</textarea><p style="margin:8px 0 0"><button class="sec">${esc(t('save'))}</button>${inv.staff_note ? ` <span class="muted" style="font-size:13px">${esc(noteBy(t, inv))}</span>` : ''}</p></form></div>`;
@@ -1648,10 +1648,10 @@ function paymentsTable(req, pays, withInv) {
     <td>${esc(t('pay_' + (PAY_KNOWN.includes(p.method) ? p.method : 'other')))}</td><td>${esc(ROLES.includes(p.staff) ? t('role_' + p.staff) : p.staff)}</td><td>${esc(p.note)}</td>
     ${isOwner(req) && !withInv ? `<td><form method="post" action="/admin/invoices/${p.invoice_id}/payments/${p.id}/delete" onsubmit="return confirm('${esc(t('confirm_delete'))}')"><button class="sec sm">✕</button></form></td>` : ''}</tr>`).join('')}</table>`;
 }
-// Время в базе — UTC; людям показываем по Алматы.
-const utcToAlmaty = (s) => { const d = new Date(String(s || '').replace(' ', 'T') + 'Z'); return Number.isNaN(+d) ? s : new Date(+d + 5 * 3600e3).toISOString().slice(0, 16).replace('T', ' '); };
+// Время в базе — UTC; людям показываем по Китаю (UTC+8).
+const utcToAlmaty = (s) => { const d = new Date(String(s || '').replace(' ', 'T') + 'Z'); return Number.isNaN(+d) ? s : new Date(+d + 8 * 3600e3).toISOString().slice(0, 16).replace('T', ' '); };
 const numIn = (v) => parseFloat(String(v || '').replace(',', '.').replace(/\s/g, ''));
-const dayIn = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10));
+const dayIn = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10));
 // Оплата: сумма в $ или ¥ (¥ переводим в $ по курсу), где приняли, в какой день; можно сразу отметить «груз выдан».
 app.post('/admin/invoices/:id/payments', (req, res) => {
   const id = parseInt(req.params.id, 10); const b = req.body;
@@ -1708,7 +1708,7 @@ app.post('/admin/clients/:id/note', (req, res) => {
 app.get('/admin/debts', (req, res) => {
   const t = req.t; const owner = isOwner(req); const credit = req.query.v === 'credit';
   const DAY = "COALESCE(NULLIF(i.inv_date, ''), substr(i.created_at, 1, 10))";
-  const rows = db.prepare(`SELECT c.id, c.code, c.name, c.phone, c.note, COUNT(*) n, SUM(${DEBT_SQL}) debt, MIN(${credit ? "date(i.credit_at, '+5 hours')" : DAY}) oldest, MIN(i.id) one
+  const rows = db.prepare(`SELECT c.id, c.code, c.name, c.phone, c.note, COUNT(*) n, SUM(${DEBT_SQL}) debt, MIN(${credit ? "date(i.credit_at, '+8 hours')" : DAY}) oldest, MIN(i.id) one
     FROM invoices i JOIN clients c ON c.id = i.client_id WHERE ${DEBT_SQL} > 0.009 ${credit ? 'AND i.credit = 1' : ''} GROUP BY c.id ORDER BY debt DESC`).all();
   const sumOf = (cr) => db.prepare(`SELECT COALESCE(SUM(${DEBT_SQL}), 0) s FROM invoices i WHERE ${cr ? 'i.credit = 1 AND ' : ''}${DEBT_SQL} > 0.009`).get().s;
   const today = almatyDay(new Date());
@@ -1717,7 +1717,7 @@ app.get('/admin/debts', (req, res) => {
   adminRender(req, res, t('a_debts'), `<div class="grid g4" style="margin-bottom:16px">${tab('', t('a_debt_total'), sumOf(false))}${tab('credit', `🤝 ${t('a_credit_total')}`, sumOf(true))}</div>
     <p class="muted">${esc(credit ? t('a_credit_hint') : t('a_pay_howto'))}</p>
     <div class="card tbl">${rows.length ? `<table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('a_rep_invoices'))}</th><th>${esc(t('a_debt'))}</th><th>${esc(t(credit ? 'a_credit_since' : 'a_debt_since'))}</th><th></th></tr>
-    ${rows.map((r) => { const days = r.oldest ? today - almatyDay(new Date(r.oldest + 'T00:00:00+05:00')) : 0;
+    ${rows.map((r) => { const days = r.oldest ? today - almatyDay(new Date(r.oldest + 'T00:00:00+08:00')) : 0;
       const list = `/admin/invoices?q=${encodeURIComponent(dispCode(r.code))}&paid=0`;
       return `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(dispCode(r.code))}</b></a></td><td>${esc(r.name)}${noteTag(r.note)}</td>
       ${owner ? `<td>${isStub(r) ? '' : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}
@@ -1730,19 +1730,19 @@ app.get('/admin/debts', (req, res) => {
 // ---------- По дням (владелец): сколько отправили и сколько денег приняли каждый день ----------
 app.get('/admin/daily', (req, res) => {
   const t = req.t;
-  const month = /^\d{4}-\d{2}$/.test(String(req.query.m || '')) ? req.query.m : new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 7);
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.m || '')) ? req.query.m : new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 7);
   const DAY = "COALESCE(NULLIF(inv_date, ''), substr(created_at, 1, 10))";
   const days = {};
   const at = (d) => (days[d] ||= { n: 0, w: 0, v: 0, a: 0, arr: 0, del: 0, pay: {}, cny: 0, exp: 0 });
   for (const r of db.prepare(`SELECT ${DAY} d, COUNT(*) n, SUM(total_weight) w, SUM(volume) v, SUM(amount) a FROM invoices WHERE substr(${DAY}, 1, 7) = ? GROUP BY d`).all(month)) Object.assign(at(r.d), { n: r.n, w: r.w || 0, v: r.v || 0, a: r.a || 0 });
-  for (const r of db.prepare("SELECT date(arrived_at, '+5 hours') d, COUNT(*) n FROM invoices WHERE substr(date(arrived_at, '+5 hours'), 1, 7) = ? GROUP BY d").all(month)) at(r.d).arr = r.n;
-  for (const r of db.prepare("SELECT date(delivered_at, '+5 hours') d, COUNT(*) n FROM invoices WHERE substr(date(delivered_at, '+5 hours'), 1, 7) = ? GROUP BY d").all(month)) at(r.d).del = r.n;
+  for (const r of db.prepare("SELECT date(arrived_at, '+8 hours') d, COUNT(*) n FROM invoices WHERE substr(date(arrived_at, '+8 hours'), 1, 7) = ? GROUP BY d").all(month)) at(r.d).arr = r.n;
+  for (const r of db.prepare("SELECT date(delivered_at, '+8 hours') d, COUNT(*) n FROM invoices WHERE substr(date(delivered_at, '+8 hours'), 1, 7) = ? GROUP BY d").all(month)) at(r.d).del = r.n;
   // Деньги по способу: наличные Алматы / Москва, юани, перевод; «Оплачено» галочкой — отдельно, город по пункту назначения.
   for (const r of db.prepare(`SELECT ${PAY_DAY} d, p.method m, i.destination dest, SUM(p.amount) s, SUM(CASE WHEN p.currency = 'CNY' THEN p.amount_orig ELSE 0 END) cny FROM payments p JOIN invoices i ON i.id = p.invoice_id WHERE substr(${PAY_DAY}, 1, 7) = ? GROUP BY d, m, dest`).all(month)) {
     const m = r.m === 'auto' || r.m === 'cash' ? (isMsk(r.dest) ? 'cash_msk' : 'cash_ala') : PAY_METHODS.includes(r.m) ? r.m : 'other';
     const x = at(r.d); x.pay[m] = (x.pay[m] || 0) + r.s; x.cny += r.cny || 0;
   }
-  for (const r of db.prepare("SELECT COALESCE(spent_on, date(created_at, '+5 hours')) d, SUM(amount) s FROM expenses WHERE substr(COALESCE(spent_on, date(created_at, '+5 hours')), 1, 7) = ? GROUP BY d").all(month)) at(r.d).exp = r.s;
+  for (const r of db.prepare("SELECT COALESCE(spent_on, date(created_at, '+8 hours')) d, SUM(amount) s FROM expenses WHERE substr(COALESCE(spent_on, date(created_at, '+8 hours')), 1, 7) = ? GROUP BY d").all(month)) at(r.d).exp = r.s;
   const list = Object.keys(days).sort().reverse();
   const tot = list.reduce((o, d) => { const x = days[d]; ['n', 'w', 'v', 'a', 'arr', 'del', 'cny', 'exp'].forEach((k) => { o[k] += x[k]; }); for (const [m, v] of Object.entries(x.pay)) o.pay[m] = (o.pay[m] || 0) + v; return o; }, { n: 0, w: 0, v: 0, a: 0, arr: 0, del: 0, pay: {}, cny: 0, exp: 0 });
   const kg = (w) => `${num(Math.round(w))} кг${w >= 1000 ? ` <span class="muted">· ${num(Math.round(w / 100) / 10)} т</span>` : ''}`;
@@ -1753,8 +1753,8 @@ app.get('/admin/daily', (req, res) => {
   const row = (label, x, cls = '') => `<tr class="${cls}"><td style="white-space:nowrap"><b>${label}</b></td><td>${x.n || '—'}</td><td style="white-space:nowrap">${x.w ? kg(x.w) : '—'}</td><td style="white-space:nowrap">${x.v ? num(Math.round(x.v * 100) / 100) + ' м³' : '—'}</td>
     <td style="white-space:nowrap">${m$(x.a)}</td><td>${x.arr || '—'}</td><td>${x.del || '—'}</td><td style="white-space:nowrap"><b style="color:var(--ok)">${m$(payT(x.pay))}</b></td>${used.map((m) => `<td style="white-space:nowrap">${m$(x.pay[m])}</td>`).join('')}${tot.cny ? `<td style="white-space:nowrap">${x.cny ? `${esc(num(Math.round(x.cny)))} ¥` : '<span class="muted">—</span>'}</td>` : ''}
     <td style="white-space:nowrap">${x.exp ? `<span style="color:var(--brand)">−${esc(money(x.exp))}</span>` : '<span class="muted">—</span>'}</td><td style="white-space:nowrap"><b>${payT(x.pay) || x.exp ? esc(money(payT(x.pay) - x.exp)) : '<span class="muted">—</span>'}</b></td></tr>`;
-  const today = new Date(Date.now() + 5 * 3600e3).toISOString().slice(0, 10);
-  const yest = new Date(Date.now() + 5 * 3600e3 - 86400e3).toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  const yest = new Date(Date.now() + 8 * 3600e3 - 86400e3).toISOString().slice(0, 10);
   const name = (d) => `${fmtDay(d)}${d === today ? ` · ${t('a_today').toLowerCase()}` : d === yest ? ` · ${t('a_yesterday')}` : ''}`;
   const y = days[yest];
   adminRender(req, res, t('a_daily'), `<div class="card"><form class="row" style="align-items:flex-end"><div><label>${esc(t('a_month'))}</label><input type="month" name="m" value="${month}"></div><button style="flex:0 0 auto">${esc(t('a_show'))}</button></form>
@@ -1820,7 +1820,7 @@ app.get('/admin/log', (req, res) => {
   const t = req.t;
   const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.day || '') ? req.query.day : '';
   const who = String(req.query.who || '').slice(0, 60);
-  const rows = db.prepare(`SELECT * FROM audit_log WHERE (? = '' OR date(at, '+5 hours') = ?) AND (? = '' OR staff = ? OR (? = '-' AND staff = '')) ORDER BY id DESC LIMIT 500`).all(day, day, who, who, who);
+  const rows = db.prepare(`SELECT * FROM audit_log WHERE (? = '' OR date(at, '+8 hours') = ?) AND (? = '' OR staff = ? OR (? = '-' AND staff = '')) ORDER BY id DESC LIMIT 500`).all(day, day, who, who, who);
   const people = db.prepare("SELECT DISTINCT staff FROM audit_log WHERE staff != '' ORDER BY staff").all().map((r) => r.staff);
   const det = (j) => { let d = {}; try { d = JSON.parse(j || '{}'); } catch {}
     return [d.n ? `×${d.n}` : '', d.st ? t('ist_' + d.st) : '', d.ps && STATUSES[d.ps] ? t('st_' + d.ps) : '', d.paid === '1' ? t('paid') : d.paid === '0' ? t('unpaid') : '',
