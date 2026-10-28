@@ -388,11 +388,11 @@ const invStatusOptions = (t, sel) => INV_STATUSES.map((k) => `<option value="${k
 const almatyDay = (d) => Math.floor((d.getTime() + 8 * 3600e3) / 86400e3);
 // Этапы считаем от даты отправки из накладной (发货日期), а не от дня загрузки на сайт.
 const invStart = (i) => (/^\d{4}-\d{2}-\d{2}/.test(String(i.inv_date || '')) ? new Date(`${String(i.inv_date).slice(0, 10)}T00:00:00+08:00`) : new Date(String(i.created_at || '').replace(' ', 'T') + 'Z'));
-// Через сколько дней после отправки наступает этап: шаг 2–3 дня (у очереди 1–2), у каждой накладной свой,
+// Через сколько дней после отправки наступает этап: в пути до таможни 3–4 дня, дальше по 2–3 (очередь 1–2), у каждой накладной свой,
 // чтобы статусы менялись не у всех в один день, как будто их ставят вручную. Для одной накладной — всегда одинаково.
 const stageDays = (i) => {
   const r = (k) => { let h = Math.imul((+i.id || 0) + k * 7919, 2654435761); h ^= h >>> 15; h = Math.imul(h, 2246822519); h ^= h >>> 13; return (h >>> 0) % 2; };
-  const d = [0]; [2, 2, 2, 1].forEach((g, k) => d.push(d[k] + g + r(k + 1)));
+  const d = [0]; [3, 2, 2, 1].forEach((g, k) => d.push(d[k] + g + r(k + 1)));
   return INV_STAGES.map(([, x], n) => (x === undefined ? undefined : d[n]));
 };
 function invStage(i) {
