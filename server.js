@@ -702,6 +702,7 @@ function invoicePage(req, inv) {
   const photos = invoicePhotos(inv.id);
   return `<div class="row noprint" style="align-items:center;margin-bottom:12px"><a href="${req.session.admin ? '/admin/invoices' : '/cabinet'}">← ${esc(t('back'))}</a>
     ${waClient(req, inv)}<span style="margin-left:auto">${payBadge(t, inv)}</span>
+    ${req.session.admin && canMoney(req) ? `<a class="btn" style="flex:0 0 auto" href="/admin/invoices/${inv.id}/edit">✏️ ${esc(t('edit'))}</a>` : ''}
     <button type="button" class="sec" onclick="print()" style="flex:0 0 auto">${esc(t('print'))}</button></div>
   <p class="muted only-m noprint" style="font-size:13px;margin:0 0 8px">${esc(t('inv_zoom_hint'))}</p>
   <div class="wb-fit"><div class="wb wb-sheet">
