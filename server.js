@@ -891,21 +891,45 @@ app.get('/admin', (req, res) => {
   adminRender(req, res, t('a_dashboard'), `${find}${hero}<div class="dgrid${m ? '' : ' half'}">${m ? `<div>${chart}${score}</div>` : ''}<div>${attention}</div>${m ? '' : '<div>'}${parcels}</div></div>`);
 });
 
+// Фильтры списка клиентов: поиск, город, серия кода (D, X, Y…), сортировка.
+function clientFilter(req) {
+  const q = String(req.query.q || '').trim(); const like = `%${q}%`; const owner = isOwner(req);
+  const where = ['1']; const args = [];
+  if (q) {
+    // Номер ищем по цифрам: «+7 747 123», «8747123» и «747123» найдут один и тот же телефон.
+    const dg = q.replace(/\D/g, ''); const core = normPhone(dg).length >= 11 ? normPhone(dg) : dg.length >= 7 && /^[78]/.test(dg) ? dg.slice(1) : dg;
+    where.push('(c.code LIKE ? OR c.code = ? OR c.code = ? OR c.name LIKE ? OR c.note LIKE ? OR (? AND c.phone LIKE ?))');
+    args.push(like, codeKey(q), q.toUpperCase().replace(/^D(?=\d)/, ''), like, like, owner ? 1 : 0, dg.length >= 4 ? `%${core}%` : like);
+  }
+  const city = String(req.query.city || '');
+  if (city === 'none') where.push('c.city_id IS NULL'); else if (/^\d+$/.test(city)) { where.push('c.city_id = ?'); args.push(+city); }
+  const series = String(req.query.series || '').toUpperCase().slice(0, 1);
+  if (series === 'D') where.push("c.code GLOB '[0-9]*'"); else if (series === '#') where.push("c.code GLOB '#*'"); else if (/^[A-Z]$/.test(series)) { where.push('UPPER(c.code) LIKE ?'); args.push(`${series}%`); }
+  const sort = ['code', 'debt'].includes(req.query.sort) && (req.query.sort !== 'debt' || canMoney(req)) ? req.query.sort : 'new';
+  // По коду: сначала буква, потом номер числом (D2 раньше D10).
+  const order = sort === 'code' ? "CASE WHEN c.code GLOB '[0-9]*' THEN 'D' ELSE UPPER(SUBSTR(c.code, 1, 1)) END, CAST(LTRIM(c.code, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#-') AS INTEGER), c.code"
+    : sort === 'debt' ? `(SELECT COALESCE(SUM(${DEBT_SQL}), 0) FROM invoices i WHERE i.client_id = c.id) DESC, c.id DESC` : 'c.id DESC';
+  return { where: where.join(' AND '), args, order, city, series, sort, q };
+}
 app.get('/admin/clients', (req, res) => {
   const t = req.t; const q = String(req.query.q || '').trim();
   const like = `%${q}%`; const owner = isOwner(req);
-  // По 300 на страницу; без поиска показываем, сколько всего клиентов.
-  const pg = Math.max(1, parseInt(req.query.page, 10) || 1); const off = (pg - 1) * 300;
-  const total = q ? 0 : db.prepare('SELECT COUNT(*) n FROM clients').get().n;
-  // Номер ищем по цифрам: «+7 747 123», «8747123» и «747123» найдут один и тот же телефон.
-  const dg = q.replace(/\D/g, ''); const core = normPhone(dg).length >= 11 ? normPhone(dg) : dg.length >= 7 && /^[78]/.test(dg) ? dg.slice(1) : dg;
-  const pl = dg.length >= 4 ? `%${core}%` : like;
+  const f = clientFilter(req); const pg = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const total = db.prepare(`SELECT COUNT(*) n FROM clients c WHERE ${f.where}`).get(...f.args).n;
   const rows = db.prepare(`SELECT c.*, ci.name city_name, (SELECT COUNT(*) FROM parcels p WHERE p.client_id = c.id) pc,
     (SELECT COALESCE(SUM(${DEBT_SQL}), 0) FROM invoices i WHERE i.client_id = c.id) due
-    FROM clients c LEFT JOIN cities ci ON ci.id = c.city_id
-    WHERE ? = '' OR c.code LIKE ? OR c.code = ? OR c.code = ? OR c.name LIKE ? OR c.note LIKE ? OR (? AND c.phone LIKE ?) ORDER BY c.id DESC LIMIT 300 OFFSET ?`).all(q, like, codeKey(q), q.toUpperCase().replace(/^D(?=\d)/, ''), like, like, owner ? 1 : 0, pl, off);
+    FROM clients c LEFT JOIN cities ci ON ci.id = c.city_id WHERE ${f.where} ORDER BY ${f.order} LIMIT 300 OFFSET ?`).all(...f.args, (pg - 1) * 300);
+  // Ссылка с теми же фильтрами, но другим параметром.
+  const link = (k, v) => { const u = new URLSearchParams({ q, city: f.city, series: f.series, sort: f.sort }); u.set(k, v); if (k !== 'page') u.delete('page'); for (const [a, b] of [...u]) if (!b) u.delete(a); return `/admin/clients?${u}`; };
+  const chip = (k, v, label) => `<a class="chip${String(f[k]) === String(v) ? ' on' : ''}" href="${esc(link(k, v))}">${esc(label)}</a>`;
+  const series = db.prepare("SELECT DISTINCT CASE WHEN code GLOB '[0-9]*' THEN 'D' WHEN code GLOB '#*' THEN '#' ELSE UPPER(SUBSTR(code, 1, 1)) END s FROM clients ORDER BY s").all().map((r) => r.s);
+  const filters = `<div class="card cl-f"><div><span class="muted">${esc(t('city'))}:</span> ${chip('city', '', t('a_f_all'))}${db.prepare('SELECT * FROM cities ORDER BY id').all().map((c) => chip('city', c.id, c.name)).join('')}${chip('city', 'none', t('a_no_city'))}</div>
+    <div><span class="muted">${esc(t('code'))}:</span> ${chip('series', '', t('a_f_all'))}${series.map((x) => chip('series', x, x === '#' ? '0–9' : x)).join('')}</div>
+    <div><span class="muted">${esc(t('a_sort'))}:</span> ${chip('sort', 'new', t('a_sort_new'))}${chip('sort', 'code', t('a_sort_code'))}${canMoney(req) ? chip('sort', 'debt', t('a_sort_debt')) : ''}</div>
+    <p class="muted" style="margin:6px 0 0">${esc(t('a_clients_total'))}: <b>${total}</b>${total > 300 ? ` · ${[...Array(Math.ceil(total / 300)).keys()].map((n) => (n + 1 === pg ? `<b>${n + 1}</b>` : `<a href="${esc(link('page', n + 1))}">${n + 1}</a>`)).join(' ')}` : ''}</p></div>`;
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   adminRender(req, res, t('a_clients'), `<div class="card"><form class="row"><div><input name="q" value="${esc(q)}" placeholder="${esc(t('code'))} / ${esc(t('name'))}${owner ? ' / ' + esc(t('phone')) : ''}"></div><button>${esc(t('search'))}</button></form></div>
+  ${filters}
   ${owner ? `<details class="card" id="add" ${req.query.code ? 'open' : ''}><summary><b>${esc(t('a_add_client'))}</b></summary><p class="muted">${esc(t('a_add_client_hint'))}</p>
     <form method="post" action="/admin/clients/add" class="row"><div><label>${esc(t('code'))}</label><input name="code" required value="${esc(req.query.code || '')}" placeholder="D185"></div>
     <div><label>${esc(t('name'))}</label><input name="name" required></div><div><label>WhatsApp</label><input name="phone" type="tel" required></div>
@@ -913,7 +937,6 @@ app.get('/admin/clients', (req, res) => {
   ${owner ? `<details class="card"><summary><b>${esc(t('a_clients_import'))}</b></summary><p class="muted">${esc(t('a_clients_import_hint'))}</p>
     <p><a class="btn sec sm" href="/admin/clients/template.xlsx">⬇️ ${esc(t('a_clients_template'))}</a></p>
     <form method="post" action="/admin/clients/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv,.html,.htm" required></div><button>${esc(t('a_upload'))}</button></form></details>` : ''}
-  ${total ? `<p class="muted">${esc(t('a_clients_total'))}: <b>${total}</b>${total > 300 ? ` · ${[...Array(Math.ceil(total / 300)).keys()].map((i) => (i + 1 === pg ? `<b>${i + 1}</b>` : `<a href="/admin/clients?page=${i + 1}">${i + 1}</a>`)).join(' ')}` : ''}</p>` : ''}
   <div class="card tbl"><table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('city'))}</th><th>${esc(t('parcels_count'))}</th>${canMoney(req) ? `<th>${esc(t('a_debts'))}</th>` : ''}${owner ? `<th>${esc(t('registered'))}</th>` : ''}</tr>
   ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(dispCode(r.code))}</b></a></td><td>${esc(r.name)}${noteTag(r.note)}</td>${owner ? `<td>${isStub(r) ? `<a href="/admin/clients?code=${encodeURIComponent(dispCode(r.code))}#add" class="badge b-border">${esc(t('a_no_phone'))}</a>` : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td>${canMoney(req) ? `<td style="white-space:nowrap">${r.due > 0.009 ? `<b style="color:var(--brand)">${esc(money(r.due))}</b>` : '<span class="muted">—</span>'}</td>` : ''}${owner ? `<td>${esc(fmtDate(r.created_at))}</td>` : ''}</tr>`).join('')}</table></div>`);
 });
