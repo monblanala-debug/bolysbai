@@ -908,25 +908,27 @@ function clientFilter(req) {
   const sort = ['code', 'debt'].includes(req.query.sort) && (req.query.sort !== 'debt' || canMoney(req)) ? req.query.sort : 'new';
   // По коду: сначала буква, потом номер числом (D2 раньше D10).
   const order = sort === 'code' ? "CASE WHEN c.code GLOB '[0-9]*' THEN 'D' ELSE UPPER(SUBSTR(c.code, 1, 1)) END, CAST(LTRIM(c.code, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#-') AS INTEGER), c.code"
-    : sort === 'debt' ? `(SELECT COALESCE(SUM(${DEBT_SQL}), 0) FROM invoices i WHERE i.client_id = c.id) DESC, c.id DESC` : 'c.id DESC';
+    : sort === 'debt' ? `(SELECT COALESCE(SUM(${DEBT_SQL}), 0) FROM invoices i WHERE i.client_id = c.id) DESC, c.id DESC`
+    // «Новые сверху»: D-коды по номеру от большего (D1600, D1560, D1559…), потом остальные серии, тоже от большего.
+    : "CASE WHEN c.code GLOB '[0-9]*' THEN 0 ELSE 1 END, CASE WHEN c.code GLOB '[0-9]*' THEN '' ELSE UPPER(SUBSTR(c.code, 1, 1)) END, CAST(LTRIM(c.code, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#-') AS INTEGER) DESC, c.id DESC";
   return { where: where.join(' AND '), args, order, city, series, sort, q };
 }
 app.get('/admin/clients', (req, res) => {
   const t = req.t; const q = String(req.query.q || '').trim();
   const like = `%${q}%`; const owner = isOwner(req);
-  const f = clientFilter(req); const pg = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const f = clientFilter(req);
   const total = db.prepare(`SELECT COUNT(*) n FROM clients c WHERE ${f.where}`).get(...f.args).n;
   const rows = db.prepare(`SELECT c.*, ci.name city_name, (SELECT COUNT(*) FROM parcels p WHERE p.client_id = c.id) pc,
     (SELECT COALESCE(SUM(${DEBT_SQL}), 0) FROM invoices i WHERE i.client_id = c.id) due
-    FROM clients c LEFT JOIN cities ci ON ci.id = c.city_id WHERE ${f.where} ORDER BY ${f.order} LIMIT 300 OFFSET ?`).all(...f.args, (pg - 1) * 300);
+    FROM clients c LEFT JOIN cities ci ON ci.id = c.city_id WHERE ${f.where} ORDER BY ${f.order} LIMIT 5000`).all(...f.args);
   // Ссылка с теми же фильтрами, но другим параметром.
-  const link = (k, v) => { const u = new URLSearchParams({ q, city: f.city, series: f.series, sort: f.sort }); u.set(k, v); if (k !== 'page') u.delete('page'); for (const [a, b] of [...u]) if (!b) u.delete(a); return `/admin/clients?${u}`; };
+  const link = (k, v) => { const u = new URLSearchParams({ q, city: f.city, series: f.series, sort: f.sort }); u.set(k, v); for (const [a, b] of [...u]) if (!b) u.delete(a); return `/admin/clients?${u}`; };
   const chip = (k, v, label) => `<a class="chip${String(f[k]) === String(v) ? ' on' : ''}" href="${esc(link(k, v))}">${esc(label)}</a>`;
   const series = db.prepare("SELECT DISTINCT CASE WHEN code GLOB '[0-9]*' THEN 'D' WHEN code GLOB '#*' THEN '#' ELSE UPPER(SUBSTR(code, 1, 1)) END s FROM clients ORDER BY s").all().map((r) => r.s);
   const filters = `<div class="card cl-f"><div><span class="muted">${esc(t('city'))}:</span> ${chip('city', '', t('a_f_all'))}${db.prepare('SELECT * FROM cities ORDER BY id').all().map((c) => chip('city', c.id, c.name)).join('')}${chip('city', 'none', t('a_no_city'))}</div>
     <div><span class="muted">${esc(t('code'))}:</span> ${chip('series', '', t('a_f_all'))}${series.map((x) => chip('series', x, x === '#' ? '0–9' : x)).join('')}</div>
     <div><span class="muted">${esc(t('a_sort'))}:</span> ${chip('sort', 'new', t('a_sort_new'))}${chip('sort', 'code', t('a_sort_code'))}${canMoney(req) ? chip('sort', 'debt', t('a_sort_debt')) : ''}</div>
-    <p class="muted" style="margin:6px 0 0">${esc(t('a_clients_total'))}: <b>${total}</b>${total > 300 ? ` · ${[...Array(Math.ceil(total / 300)).keys()].map((n) => (n + 1 === pg ? `<b>${n + 1}</b>` : `<a href="${esc(link('page', n + 1))}">${n + 1}</a>`)).join(' ')}` : ''}</p></div>`;
+    <p class="muted" style="margin:6px 0 0">${esc(t('a_clients_total'))}: <b>${total}</b></p></div>`;
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   adminRender(req, res, t('a_clients'), `<div class="card"><form class="row"><div><input name="q" value="${esc(q)}" placeholder="${esc(t('code'))} / ${esc(t('name'))}${owner ? ' / ' + esc(t('phone')) : ''}"></div><button>${esc(t('search'))}</button></form></div>
   ${filters}
