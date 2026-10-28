@@ -1258,7 +1258,18 @@ app.get('/admin/invoice-template.xlsx', (req, res) => {
 });
 
 // Номер склада вида D185-0301-2 или AB016-3D-0302-2: код клиента, ММДД отправки, мест.
-const parseCargoNo = (no) => /^(.+?)-(\d{2})(\d{2})-(\d+)/.exec(String(no || '').trim());
+// Номер груза: код-ММДД-мест (D1250-1024-1, AB016-W-1027-3, AM-5250-1025-1 — код с дефисом).
+// Без даты (LL4180-41-629) — только код до первого дефиса, дату и места берём из таблицы.
+const okMD = (m) => m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31;
+const parseCargoNo = (no) => {
+  const s = String(no || '').trim();
+  let m = /^(.+)-(\d{2})(\d{2})-(\d+)$/.exec(s);
+  if (okMD(m)) return m;
+  m = /^(.+?)-(\d{2})(\d{2})-(\d+)/.exec(s);
+  if (okMD(m)) return m;
+  m = /^([A-Za-z]+-?\d[A-Za-z0-9]*)-[A-Za-z0-9-]+$/.exec(s);
+  return m ? [s, m[1], null, null, null] : null;
+};
 const DEST_RU = { 阿拉木图: 'Алматы', 比什凯克: 'Бишкек', 莫斯科: 'Москва', '19公里': 'Москва, Южные ворота', 莫斯科外送: 'Москва, доставка' };
 // Клиент без WhatsApp, созданный из таблицы склада: телефон-заглушка «stub-код», войти в кабинет пока не может.
 const isStub = (client) => String(client.phone || '').startsWith('stub-');
@@ -1280,16 +1291,16 @@ function importInvoiceRow(req, rec, dayDefault, bad, skipped) {
   let c = null;
   for (let k = parts.length; k > 0 && !c; k--) c = findClientByCode(parts.slice(0, k).join('-'));
   // Нового клиента из таблицы заводим сразу (без номера), чтобы его накладные не потерялись; номер добавят потом.
-  if (!c) { const code = codeKey(parts[0]); c = stubClient(code, rec.destination); bad.push(dispCode(code)); }
+  if (!c) { const code = codeKey(/\d/.test(parts[0]) || parts.length < 2 ? parts[0] : parts.slice(0, 2).join('-')); c = stubClient(code, rec.destination); bad.push(dispCode(code)); }
   const client = getClient(c.id);
-  if (!rec.inv_date && cno) {
+  if (!rec.inv_date && cno && cno[2]) {
     // Год берём из даты по умолчанию; если месяц из номера ещё не наступил, это прошлый год.
     let y = +dayDefault.slice(0, 4);
     if (`${y}-${cno[2]}-${cno[3]}` > dayDefault) y--;
     rec.inv_date = `${y}-${cno[2]}-${cno[3]}`;
   }
   rec.inv_date = parseDay(rec.inv_date, dayDefault);
-  if (!numOrNull(rec.pieces) && cno) rec.pieces = cno[4];
+  if (!numOrNull(rec.pieces) && cno && cno[4]) rec.pieces = cno[4];
   const n = (k) => numOrNull(String(rec[k] ?? '').replace(',', '.')) || 0;
   // Цена за кг или за м³ по самой цене: за кг — до ~5 $, за м³ — от 100 $. Между ними смотрим, что сходится с итогом.
   if (!rec.price_basis) {
