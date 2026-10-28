@@ -887,16 +887,20 @@ app.get('/admin', (req, res) => {
     <div class="dleg">${st.map(([s, n]) => `<a href="/admin/parcels?status=${s}"><i class="s-${s}"></i>${esc(t('st_' + s))}<b>${n}</b></a>`).join('')}</div>
     <div class="dfoot"><span>👤 ${esc(t('a_total_clients'))} <b>${c('SELECT COUNT(*) c FROM clients')}</b></span><span>🆕 ${esc(t('a_this_month'))} <b>${mo.fresh}</b> ${chip(cur.fresh, prev.fresh)}</span></div></div>`;
   // Бухгалтеру — только рабочее: склад, внимание, посылки. Тонны, график и сравнение видит владелец.
-  adminRender(req, res, t('a_dashboard'), `${hero}<div class="dgrid${m ? '' : ' half'}">${m ? `<div>${chart}${score}</div>` : ''}<div>${attention}</div>${m ? '' : '<div>'}${parcels}</div></div>`);
+  const find = `<form action="/admin/clients" class="row noprint" style="margin-bottom:12px"><div><input name="q" placeholder="🔍 ${esc(t('a_find_client'))}${isOwner(req) ? ' / ' + esc(t('phone')) : ''}"></div><button class="sec">${esc(t('search'))}</button></form>`;
+  adminRender(req, res, t('a_dashboard'), `${find}${hero}<div class="dgrid${m ? '' : ' half'}">${m ? `<div>${chart}${score}</div>` : ''}<div>${attention}</div>${m ? '' : '<div>'}${parcels}</div></div>`);
 });
 
 app.get('/admin/clients', (req, res) => {
   const t = req.t; const q = String(req.query.q || '').trim();
   const like = `%${q}%`; const owner = isOwner(req);
+  // Номер ищем по цифрам: «+7 747 123», «8747123» и «747123» найдут один и тот же телефон.
+  const dg = q.replace(/\D/g, ''); const core = normPhone(dg).length >= 11 ? normPhone(dg) : dg.length >= 7 && /^[78]/.test(dg) ? dg.slice(1) : dg;
+  const pl = dg.length >= 4 ? `%${core}%` : like;
   const rows = db.prepare(`SELECT c.*, ci.name city_name, (SELECT COUNT(*) FROM parcels p WHERE p.client_id = c.id) pc,
     (SELECT COALESCE(SUM(${DEBT_SQL}), 0) FROM invoices i WHERE i.client_id = c.id) due
     FROM clients c LEFT JOIN cities ci ON ci.id = c.city_id
-    WHERE ? = '' OR c.code LIKE ? OR c.code = ? OR c.code = ? OR c.name LIKE ? OR c.note LIKE ? OR (? AND c.phone LIKE ?) ORDER BY c.id DESC LIMIT 300`).all(q, like, codeKey(q), q.toUpperCase().replace(/^D(?=\d)/, ''), like, like, owner ? 1 : 0, like);
+    WHERE ? = '' OR c.code LIKE ? OR c.code = ? OR c.code = ? OR c.name LIKE ? OR c.note LIKE ? OR (? AND c.phone LIKE ?) ORDER BY c.id DESC LIMIT 300`).all(q, like, codeKey(q), q.toUpperCase().replace(/^D(?=\d)/, ''), like, like, owner ? 1 : 0, pl);
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   adminRender(req, res, t('a_clients'), `<div class="card"><form class="row"><div><input name="q" value="${esc(q)}" placeholder="${esc(t('code'))} / ${esc(t('name'))}${owner ? ' / ' + esc(t('phone')) : ''}"></div><button>${esc(t('search'))}</button></form></div>
   ${owner ? `<details class="card" id="add" ${req.query.code ? 'open' : ''}><summary><b>${esc(t('a_add_client'))}</b></summary><p class="muted">${esc(t('a_add_client_hint'))}</p>
@@ -904,6 +908,7 @@ app.get('/admin/clients', (req, res) => {
     <div><label>${esc(t('name'))}</label><input name="name" required></div><div><label>WhatsApp</label><input name="phone" type="tel" required></div>
     <div><label>${esc(t('city'))}</label><select name="city_id">${cities.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><button>${esc(t('add'))}</button></form></details>` : ''}
   ${owner ? `<details class="card"><summary><b>${esc(t('a_clients_import'))}</b></summary><p class="muted">${esc(t('a_clients_import_hint'))}</p>
+    <p><a class="btn sec sm" href="/admin/clients/template.xlsx">⬇️ ${esc(t('a_clients_template'))}</a></p>
     <form method="post" action="/admin/clients/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv" required></div><button>${esc(t('a_upload'))}</button></form></details>` : ''}
   <div class="card tbl"><table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('city'))}</th><th>${esc(t('parcels_count'))}</th>${canMoney(req) ? `<th>${esc(t('a_debts'))}</th>` : ''}${owner ? `<th>${esc(t('registered'))}</th>` : ''}</tr>
   ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(dispCode(r.code))}</b></a></td><td>${esc(r.name)}${noteTag(r.note)}</td>${owner ? `<td>${isStub(r) ? `<a href="/admin/clients?code=${encodeURIComponent(dispCode(r.code))}#add" class="badge b-border">${esc(t('a_no_phone'))}</a>` : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td>${canMoney(req) ? `<td style="white-space:nowrap">${r.due > 0.009 ? `<b style="color:var(--brand)">${esc(money(r.due))}</b>` : '<span class="muted">—</span>'}</td>` : ''}${owner ? `<td>${esc(fmtDate(r.created_at))}</td>` : ''}</tr>`).join('')}</table></div>`);
@@ -916,12 +921,22 @@ const CLIENT_COLS = { code: ['код', 'код клиента', 'code', '编码'
 const matchClientCol = (h) => { const v = String(h || '').toLowerCase().trim(); return Object.keys(CLIENT_COLS).find((k) => CLIENT_COLS[k].includes(v)) || null; };
 const looksCode = (v) => /^[A-Z]{1,3}-?\d{1,5}$/i.test(String(v || '').trim());
 
+// Шаблон для загрузки старой базы: Имя, Телефон, Город, Код.
+app.get('/admin/clients/template.xlsx', (req, res) => {
+  if (!isOwner(req)) return res.redirect('/admin/clients');
+  const city = (db.prepare('SELECT name FROM cities ORDER BY id').get() || {}).name || 'Алматы';
+  const ws = XLSX.utils.aoa_to_sheet([['Имя', 'Телефон', 'Город', 'Код'], ['Айгерим', '+7 747 123 45 67', city, 'D15'], ['Иван', '89161234567', 'Москва', 'Y7']]);
+  ws['!cols'] = [{ wch: 24 }, { wch: 18 }, { wch: 14 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Клиенты');
+  res.setHeader('Content-Disposition', 'attachment; filename="clients-template.xlsx"');
+  res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+});
 app.post('/admin/clients/import', upload.single('file'), (req, res) => {
   if (!isOwner(req) || !req.file) return res.redirect('/admin/clients');
   const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
   const cities = db.prepare('SELECT * FROM cities').all();
   const findCity = (v) => { const s = String(v || ''); return cities.find((c) => s && (s.includes(c.name) || (CITY_ZH[c.name] && s.includes(CITY_ZH[c.name])))); };
-  let added = 0; let updated = 0; const dup = [];
+  let added = 0; let updated = 0; let skipped = 0; const dup = []; const noCity = new Map();
   db.exec('BEGIN');
   for (const name of wb.SheetNames) {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '' });
@@ -938,11 +953,14 @@ app.post('/admin/clients/import', upload.single('file'), (req, res) => {
       map = []; map[ci] = 'code'; if (pi !== ci) map[pi] = 'phone'; if (ni >= 0 && ni !== ci && ni !== pi) map[ni] = 'name';
       hi = -1;
     }
+    // С заголовком «Код» берём и коды из одних цифр (9455); без заголовков — только вида D15, Y7.
+    const okCode = (v) => looksCode(v) || (hi >= 0 && /^\d{1,6}$/.test(String(v || '').trim()));
     for (const row of rows.slice(hi + 1)) {
       const rec = {}; map.forEach((f, i) => { if (f) rec[f] = String(row[i] ?? '').trim(); });
-      if (!looksCode(rec.code)) continue;
+      if (!okCode(rec.code)) { if (Object.values(rec).some(Boolean)) skipped++; continue; }
       const code = codeKey(rec.code.replace('-', ''));
       const phone = normPhone(rec.phone); const city = findCity(rec.city);
+      if (rec.city && !city) noCity.set(rec.city, (noCity.get(rec.city) || 0) + 1);
       const ex = db.prepare('SELECT * FROM clients WHERE code = ?').get(code);
       const taken = phone.length >= 10 ? db.prepare('SELECT id FROM clients WHERE phone = ?').get(phone) : null;
       if (taken && (!ex || taken.id !== ex.id)) { dup.push(dispCode(code)); continue; }
@@ -958,7 +976,9 @@ app.post('/admin/clients/import', upload.single('file'), (req, res) => {
     }
   }
   db.exec('COMMIT');
-  req.session.flash = `${req.t('a_clients_added')}: ${added}, ${req.t('a_clients_updated')}: ${updated}${dup.length ? `. ${req.t('a_clients_dup')}: ${dup.slice(0, 30).join(', ')}` : ''}`;
+  req.session.flash = `${req.t('a_clients_added')}: ${added}, ${req.t('a_clients_updated')}: ${updated}${dup.length ? `. ${req.t('a_clients_dup')}: ${dup.slice(0, 30).join(', ')}` : ''}`
+    + (skipped ? `. ${req.t('a_clients_skipped')}: ${skipped}` : '')
+    + (noCity.size ? `. ${req.t('a_clients_nocity')}: ${[...noCity].slice(0, 15).map(([c, n]) => `${c} (${n})`).join(', ')}` : '');
   res.redirect('/admin/clients');
 });
 
