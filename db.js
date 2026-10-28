@@ -526,6 +526,22 @@ seed();
   upd.run('Нет китайской карты? Оплатим в юанях заказ на 1688, Taobao, Pinduoduo, а также вашему заводу или поставщику — и мелкие, и крупные закупки.', 'promo_text_ru', 'Оплатим заказ на 1688, Taobao, Pinduoduo, пополним Alipay и WeChat в юанях. Напишите — поможем.');
   upd.run('我们帮您在中国付款', 'promo_title_zh', '无法付款给供应商？');
   upd.run('没有中国银行卡？我们用人民币帮您支付 1688、淘宝、拼多多订单，也可以直接付款给工厂或供应商，小额大额采购都可以。', 'promo_text_zh', '我们帮您支付 1688、淘宝、拼多多订单，充值支付宝和微信人民币。');
+  // Коды из одних цифр, которые до 27.10 заводились без «#» и показывались как D2838 вместо 2838.
+  // Узнаём их по накладным: все номера начинаются с «2838-», а не с «D2838-». Если уже есть правильный клиент #2838 — сливаем.
+  for (const c of db.prepare("SELECT * FROM clients WHERE code GLOB '[0-9]*' AND phone LIKE 'stub-%'").all()) {
+    const invs = db.prepare('SELECT number FROM invoices WHERE client_id = ?').all(c.id).map((r) => String(r.number));
+    const twin = db.prepare('SELECT id FROM clients WHERE code = ?').get(`#${c.code}`);
+    const bare = invs.length ? invs.every((n) => n.startsWith(`${c.code}-`)) : !!twin && c.name === `D${c.code}`;
+    if (!bare) continue;
+    db.exec('BEGIN');
+    if (twin) {
+      for (const tb of ['invoices', 'parcels', 'forward_requests']) db.prepare(`UPDATE ${tb} SET client_id = ? WHERE client_id = ?`).run(twin.id, c.id);
+      db.prepare('DELETE FROM clients WHERE id = ?').run(c.id);
+    } else {
+      db.prepare('UPDATE clients SET code = ?, name = CASE WHEN name = ? THEN ? ELSE name END, phone = ? WHERE id = ?').run(`#${c.code}`, `D${c.code}`, c.code, `stub-#${c.code}`, c.id);
+    }
+    db.exec('COMMIT');
+  }
   // Номера, записанные до новых правил (0555…, 916…, 138…), приводим к международному виду, если такой номер ещё не занят.
   for (const c of db.prepare("SELECT id, phone FROM clients WHERE phone NOT LIKE 'stub-%'").all()) {
     const n = normPhone(c.phone);
