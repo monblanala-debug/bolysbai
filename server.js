@@ -118,6 +118,8 @@ const money = (v) => `${(Math.round(v * 100) / 100).toLocaleString('ru-RU')} ${s
 // «26.10 11:10» для приёмки.
 const fmtDT = (s) => (s ? `${String(s).slice(8, 10)}.${String(s).slice(5, 7)} ${String(s).slice(11, 16)}` : '');
 const fmtDate = (s) => (s ? String(s).slice(0, 16).replace('T', ' ') : '');
+// Время из базы хранится по UTC — показываем по Алматы (UTC+5).
+const fmtUtc = (s) => (s ? utcToAlmaty(s) : '');
 const activeWarehouses = () => db.prepare('SELECT * FROM warehouses WHERE active = 1 ORDER BY id').all();
 const getClient = (id) => db.prepare(`SELECT c.*, ci.name city_name, ci.pickup_address FROM clients c
   LEFT JOIN cities ci ON ci.id = c.city_id WHERE c.id = ?`).get(id);
@@ -374,7 +376,7 @@ app.get('/address', (req, res) => {
 
 function parcelHistory(t, parcelId) {
   return db.prepare('SELECT * FROM parcel_events WHERE parcel_id = ? ORDER BY id DESC').all(parcelId)
-    .map((e) => `<div>${esc(fmtDate(e.created_at))} — ${esc(t('st_' + e.status))}${e.comment ? ' · ' + esc(e.comment) : ''}</div>`).join('');
+    .map((e) => `<div>${esc(fmtUtc(e.created_at))} — ${esc(t('st_' + e.status))}${e.comment ? ' · ' + esc(e.comment) : ''}</div>`).join('');
 }
 
 // Статус накладной идёт сам по дням от загрузки в базу: 0 — отправлено, +3 — едет на таможню, +5 — на таможне,
@@ -504,7 +506,7 @@ const newsText = (lang, n) => (lang === 'zh' && n.text_zh) || (lang === 'kk' && 
 function newsBlock(req) {
   const rows = db.prepare('SELECT * FROM news ORDER BY id DESC LIMIT 5').all();
   if (!rows.length) return '';
-  return `<div class="card news"><h2>📢 ${esc(req.t('news_title'))}</h2>${rows.map((n) => `<div class="news-i"><span class="muted">${esc(fmtDay(n.created_at))}</span> ${esc(newsText(req.lang, n))}</div>`).join('')}</div>`;
+  return `<div class="card news"><h2>📢 ${esc(req.t('news_title'))}</h2>${rows.map((n) => `<div class="news-i"><span class="muted">${esc(fmtDay(fmtUtc(n.created_at)))}</span> ${esc(newsText(req.lang, n))}</div>`).join('')}</div>`;
 }
 
 // ---------- Личный кабинет ----------
@@ -733,7 +735,7 @@ const FWD_METHODS = ['truck', 'tk', 'any'];
 function forwardCard(req, inv) {
   const t = req.t;
   const reqs = db.prepare('SELECT * FROM forward_requests WHERE invoice_id = ? ORDER BY id DESC').all(inv.id);
-  const list = reqs.map((r) => `<div class="news-i"><b>${esc(r.city)}</b> · ${esc(t('fwd_m_' + r.method))} · ${esc(fmtDay(r.created_at))}
+  const list = reqs.map((r) => `<div class="news-i"><b>${esc(r.city)}</b> · ${esc(t('fwd_m_' + r.method))} · ${esc(fmtDay(fmtUtc(r.created_at)))}
     <span class="badge ${r.status === 'done' ? 'b-arrived' : 'b-transit'}">${esc(t(r.status === 'done' ? 'fwd_done' : 'fwd_new'))}</span></div>`).join('');
   if (req.session.admin) return reqs.length ? `<div class="card noprint"><h2 style="margin-top:0">🚚 ${esc(t('fwd_title'))}</h2>${list}<p><a href="/admin/forward">${esc(t('a_forward'))} →</a></p></div>` : '';
   if (reqs.some((r) => r.status === 'new')) return `<div class="card noprint"><h2 style="margin-top:0">🚚 ${esc(t('fwd_title'))}</h2>${list}</div>`;
@@ -941,7 +943,7 @@ app.get('/admin/clients', (req, res) => {
     <p><a class="btn sec sm" href="/admin/clients/template.xlsx">⬇️ ${esc(t('a_clients_template'))}</a></p>
     <form method="post" action="/admin/clients/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv,.html,.htm" required></div><button>${esc(t('a_upload'))}</button></form></details>` : ''}
   <div class="card tbl"><table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('city'))}</th><th>${esc(t('parcels_count'))}</th>${canMoney(req) ? `<th>${esc(t('a_debts'))}</th>` : ''}${owner ? `<th>${esc(t('registered'))}</th>` : ''}</tr>
-  ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(dispCode(r.code))}</b></a></td><td>${esc(r.name)}${noteTag(r.note)}</td>${owner ? `<td>${isStub(r) ? `<a href="/admin/clients?code=${encodeURIComponent(dispCode(r.code))}#add" class="badge b-border">${esc(t('a_no_phone'))}</a>` : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td>${canMoney(req) ? `<td style="white-space:nowrap">${r.due > 0.009 ? `<b style="color:var(--brand)">${esc(money(r.due))}</b>` : '<span class="muted">—</span>'}</td>` : ''}${owner ? `<td>${esc(fmtDate(r.created_at))}</td>` : ''}</tr>`).join('')}</table></div>`);
+  ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(dispCode(r.code))}</b></a></td><td>${esc(r.name)}${noteTag(r.note)}</td>${owner ? `<td>${isStub(r) ? `<a href="/admin/clients?code=${encodeURIComponent(dispCode(r.code))}#add" class="badge b-border">${esc(t('a_no_phone'))}</a>` : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td>${canMoney(req) ? `<td style="white-space:nowrap">${r.due > 0.009 ? `<b style="color:var(--brand)">${esc(money(r.due))}</b>` : '<span class="muted">—</span>'}</td>` : ''}${owner ? `<td>${esc(fmtUtc(r.created_at))}</td>` : ''}</tr>`).join('')}</table></div>`);
 });
 
 // ---------- База клиентов из Excel (только владелец: там телефоны) ----------
@@ -1051,7 +1053,7 @@ app.get('/admin/clients/:id', (req, res) => {
   const money3 = invoices.reduce((m, i) => { m.all += i.amount || 0; m.debt += invDebt(i); return m; }, { all: 0, debt: 0 });
   const pays = db.prepare('SELECT p.*, i.number FROM payments p JOIN invoices i ON i.id = p.invoice_id WHERE i.client_id = ? ORDER BY p.id DESC LIMIT 50').all(client.id);
   adminRender(req, res, client.code, `<div class="card"><h1>${esc(client.name)}${phone}</h1>
-    <div class="code">${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div><div class="muted">${esc(client.city_name || '')} · ${esc(fmtDate(client.created_at))}</div>
+    <div class="code">${esc(w ? shippingMark(w.mark_template, client) : client.code)}</div><div class="muted">${esc(client.city_name || '')} · ${esc(fmtUtc(client.created_at))}</div>
     <form method="post" action="/admin/clients/${client.id}/note" style="margin-top:12px"><label>📝 ${esc(t('a_client_note'))} <span class="muted" style="font-weight:400">· ${esc(t('a_note_hidden'))}</span></label>
     <textarea name="note" rows="2" placeholder="${esc(t('a_client_note_ph'))}">${esc(client.note || '')}</textarea><p style="margin:8px 0 0"><button class="sec">${esc(t('save'))}</button></p></form></div>
     ${canMoney(req) ? `<div class="grid g4"><div class="card"><div class="muted">${esc(t('a_charged'))}</div><div class="stat">${esc(money(money3.all))}</div></div>
@@ -1070,7 +1072,7 @@ function parcelsTable(req, parcels) {
   ${parcels.map((p) => { const ph = db.prepare('SELECT file FROM parcel_photos WHERE parcel_id = ? ORDER BY id LIMIT 1').get(p.id);
     return `<tr><td><input type="checkbox" name="ids" value="${p.id}" style="width:auto"></td><td>${ph ? `<a href="/photo/${esc(ph.file)}" target="_blank"><img src="/photo/${esc(ph.file)}" loading="lazy" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px;display:block;margin-bottom:4px"></a>` : ''}${esc(p.track)}</td>
   <td>${p.client_id ? `<a href="/admin/clients/${p.client_id}">${esc(p.client_code)}</a>` : `<span class="badge b-border">${esc(p.client_code || t('a_no_client'))}</span>`}</td>
-  <td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td><td>${p.invoice_id ? `<a href="/admin/invoices/${p.invoice_id}">#${p.invoice_id}</a>` : ''}</td><td>${esc(fmtDate(p.scanned_at || p.updated_at))}</td></tr>`; }).join('')}
+  <td>${statusBadge(t, p.status)}</td><td>${p.weight}</td><td>${p.places}</td><td>${esc(p.description)}</td><td>${p.invoice_id ? `<a href="/admin/invoices/${p.invoice_id}">#${p.invoice_id}</a>` : ''}</td><td>${esc(p.scanned_at ? fmtDate(p.scanned_at) : fmtUtc(p.updated_at))}</td></tr>`; }).join('')}
   </table></div><div class="row" style="margin-top:12px;align-items:flex-end"><div><label>${esc(t('a_bulk_status'))}</label><select name="status"><option value="">— ${esc(t('a_no_change'))} —</option>${statusOptions(t)}</select></div>
   <div><label>${esc(t('note'))}</label><input name="comment"></div><div><label>${esc(t('a_assign_code'))}</label><input name="assign" placeholder="D1600"></div><button>${esc(t('apply'))}</button></div>
   <input type="hidden" name="back" value="${esc(req.originalUrl)}"></form>`;
@@ -1907,7 +1909,7 @@ app.get('/admin/news', (req, res) => {
   adminRender(req, res, t('a_news'), `<div class="card"><h2>${esc(t('a_news_add'))}</h2><p class="muted">${esc(t('a_news_hint'))}</p>
     <form method="post" action="/admin/news"><label>рус</label><textarea name="text_ru" required rows="2" placeholder="Склад в Китае закрыт на Новый год с 10 по 17 февраля"></textarea>
     <label>中文</label><textarea name="text_zh" rows="2"></textarea><label>қаз</label><textarea name="text_kk" rows="2"></textarea><p><button>${esc(t('a_news_add'))}</button></p></form></div>
-    <div class="card">${rows.length ? rows.map((n) => `<div class="row" style="align-items:center;border-bottom:1px solid var(--line);padding:8px 0"><div><span class="muted">${esc(fmtDay(n.created_at))}</span> ${esc(n.text_ru)}${n.text_zh ? `<div class="muted">${esc(n.text_zh)}</div>` : ''}${n.text_kk ? `<div class="muted">${esc(n.text_kk)}</div>` : ''}</div>
+    <div class="card">${rows.length ? rows.map((n) => `<div class="row" style="align-items:center;border-bottom:1px solid var(--line);padding:8px 0"><div><span class="muted">${esc(fmtDay(fmtUtc(n.created_at)))}</span> ${esc(n.text_ru)}${n.text_zh ? `<div class="muted">${esc(n.text_zh)}</div>` : ''}${n.text_kk ? `<div class="muted">${esc(n.text_kk)}</div>` : ''}</div>
       <form method="post" action="/admin/news/${n.id}/delete" style="flex:0 0 auto;margin:0" onsubmit="return confirm('${esc(t('confirm_delete'))}')"><button class="sec sm">${esc(t('delete'))}</button></form></div>`).join('') : `<p class="muted">${esc(t('a_news_empty'))}</p>`}</div>`);
 });
 app.post('/admin/news', (req, res) => {
@@ -1927,7 +1929,7 @@ app.get('/admin/forward', (req, res) => {
     ORDER BY f.status = 'done', f.id DESC LIMIT 200`).all();
   adminRender(req, res, t('a_forward'), `<div class="card"><p class="muted" style="margin:0">${esc(t('a_forward_hint'))}</p></div>
   <div class="card tbl">${rows.length ? `<table><tr><th>${esc(t('date'))}</th><th>${esc(t('invoice'))}</th><th>${esc(t('fwd_city'))}</th><th>${esc(t('fwd_method'))}</th><th>${esc(t('fwd_receiver'))}</th><th>${esc(t('note'))}</th><th></th></tr>
-  ${rows.map((r) => `<tr${r.status === 'done' ? ' style="opacity:.55"' : ''}><td>${esc(fmtDay(r.created_at))}</td><td><a href="/admin/invoices/${r.invoice_id}"><b>${esc(r.number)}</b></a><div class="muted" style="font-size:13px">${esc(dispCode(r.code))} ${esc(r.name)}</div></td>
+  ${rows.map((r) => `<tr${r.status === 'done' ? ' style="opacity:.55"' : ''}><td>${esc(fmtDay(fmtUtc(r.created_at)))}</td><td><a href="/admin/invoices/${r.invoice_id}"><b>${esc(r.number)}</b></a><div class="muted" style="font-size:13px">${esc(dispCode(r.code))} ${esc(r.name)}</div></td>
     <td><b>${esc(r.city)}</b></td><td>${esc(t('fwd_m_' + r.method))}</td><td>${esc(r.receiver)}${r.receiver_phone && isOwner(req) ? `<div>${esc(r.receiver_phone)}</div>` : ''}</td><td>${esc(r.note)}</td>
     <td><form method="post" action="/admin/forward/${r.id}" style="margin:0"><input type="hidden" name="status" value="${r.status === 'done' ? 'new' : 'done'}"><button class="sec sm">${esc(t(r.status === 'done' ? 'fwd_reopen' : 'fwd_mark_done'))}</button></form></td></tr>`).join('')}</table>` : `<p class="muted">${esc(t('a_forward_empty'))}</p>`}</div>`);
 });
