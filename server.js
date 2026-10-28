@@ -386,11 +386,20 @@ const INV_STATUSES = ['auto', ...INV_STAGES.map(([k]) => k)];
 const invStatusOptions = (t, sel) => INV_STATUSES.map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(t('ist_' + k))}</option>`).join('');
 // Дни считаем по календарю Китая (UTC+8).
 const almatyDay = (d) => Math.floor((d.getTime() + 8 * 3600e3) / 86400e3);
-const invStart = (i) => new Date(String(i.created_at || '').replace(' ', 'T') + 'Z');
+// Этапы считаем от даты отправки из накладной (发货日期), а не от дня загрузки на сайт.
+const invStart = (i) => (/^\d{4}-\d{2}-\d{2}/.test(String(i.inv_date || '')) ? new Date(`${String(i.inv_date).slice(0, 10)}T00:00:00+08:00`) : new Date(String(i.created_at || '').replace(' ', 'T') + 'Z'));
+// Через сколько дней после отправки наступает этап: шаг 2–3 дня (у очереди 1–2), у каждой накладной свой,
+// чтобы статусы менялись не у всех в один день, как будто их ставят вручную. Для одной накладной — всегда одинаково.
+const stageDays = (i) => {
+  const r = (k) => { let h = Math.imul((+i.id || 0) + k * 7919, 2654435761); h ^= h >>> 15; h = Math.imul(h, 2246822519); h ^= h >>> 13; return (h >>> 0) % 2; };
+  const d = [0]; [2, 2, 2, 1].forEach((g, k) => d.push(d[k] + g + r(k + 1)));
+  return INV_STAGES.map(([, x], n) => (x === undefined ? undefined : d[n]));
+};
 function invStage(i) {
   if (INV_STATUSES.includes(i.inv_status) && i.inv_status !== 'auto') return i.inv_status;
   const days = almatyDay(new Date()) - almatyDay(invStart(i));
-  return INV_STAGES.filter(([, d]) => d !== undefined && days >= d).pop()[0];
+  const sd = stageDays(i);
+  return INV_STAGES.filter((_, n) => sd[n] !== undefined && days >= sd[n]).pop()[0];
 }
 const invBadge = (t, i) => { const s = invStage(i); return `<span class="badge b-${s === 'sent' ? 'china' : s === 'arrived' || s === 'delivered' ? s : s === 'to_customs' ? 'transit' : 'border'}">${esc(t('ist_' + s))}</span>`; };
 // ---------- Деньги: оплата частями и долг ----------
@@ -445,8 +454,10 @@ const noteTag = (note) => (note ? `<div class="staff-note">📝 ${esc(note)}</di
 function invTimeline(t, i) {
   const cur = INV_STAGES.findIndex(([k]) => k === invStage(i));
   const start = almatyDay(invStart(i));
-  const day = (n) => fmtDay(new Date((start + n) * 86400e3).toISOString().slice(0, 10));
-  const when = (d, n) => (d !== undefined && n <= cur ? day(d) : '');
+  const today = almatyDay(new Date()); const sd = stageDays(i);
+  // Дата этапа не позже сегодняшней: если статус поставили вручную раньше срока, будущих дат не показываем.
+  const day = (n) => fmtDay(new Date((Math.min(start + n, today)) * 86400e3).toISOString().slice(0, 10));
+  const when = (d, n) => (sd[n] !== undefined && n <= cur ? day(sd[n]) : '');
   return `<ol class="tl">${INV_STAGES.map(([k, d], n) => `<li class="${n < cur ? 'done' : n === cur ? 'on' : ''}"><b>${esc(t('ist_' + k))}${k === 'arrived' && i.destination ? ` · ${esc(destName(i.destination))}` : ''}</b>${when(d, n) ? `<div class="muted" style="font-size:13px">${esc(when(d, n))}</div>` : ''}${k === 'arrived' && n === cur ? `<div class="alert info" style="margin:6px 0 0">${esc(t('pickup_wait'))}</div>` : ''}</li>`).join('')}</ol>`;
 }
 // Номер накладной без учёта регистра и пробелов: d1601-1030-4 → D1601-1030-4.
