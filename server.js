@@ -2010,7 +2010,7 @@ app.get('/admin/settings', (req, res) => {
     <div><label>${esc(t('hours'))} (中文)</label><input name="wh_${w.id}_hours_zh" value="${esc(w.hours_zh)}"></div></div>
     <div class="row"><div><label>${esc(t('wh_note'))} (рус)</label><input name="wh_${w.id}_note_ru" value="${esc(w.note_ru)}"></div>
     <div><label>${esc(t('wh_note'))} (中文)</label><input name="wh_${w.id}_note_zh" value="${esc(w.note_zh)}"></div></div>
-    <div class="row"><div><label>${esc(t('mark_tpl'))} ({code}, {last4})</label><input name="wh_${w.id}_mark_template" value="${esc(w.mark_template)}"></div>
+    <div class="row"><div><label>${esc(t('mark_tpl'))} ({code}, {last4}, {city})</label><input name="wh_${w.id}_mark_template" value="${esc(w.mark_template)}"></div>
     <div><label>${esc(t('name_tpl'))} ({mark}, {receiver})</label><input name="wh_${w.id}_name_template" value="${esc(w.name_template)}"></div>
     <div><label>${esc(t('active'))}</label><select name="wh_${w.id}_active"><option value="1" ${w.active ? 'selected' : ''}>✓</option><option value="0" ${w.active ? '' : 'selected'}>✗</option></select></div></div></div>`;
   adminRender(req, res, t('a_settings'), `<form method="post" action="/admin/settings">

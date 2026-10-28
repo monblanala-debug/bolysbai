@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS warehouses (
   receiver TEXT NOT NULL,
   phone TEXT NOT NULL,
   address TEXT NOT NULL,
-  mark_template TEXT NOT NULL DEFAULT 'D{code}-{last4}',
+  mark_template TEXT NOT NULL DEFAULT 'D{code}-{last4}-{city}',
   name_template TEXT NOT NULL DEFAULT '{mark}',
   note_ru TEXT DEFAULT '',
   note_zh TEXT DEFAULT '',
@@ -542,6 +542,8 @@ seed();
     }
     db.exec('COMMIT');
   }
+  // Маркировка с городом в конце: D1566-7741-ALMATY (если шаблон не меняли).
+  db.prepare("UPDATE warehouses SET mark_template = 'D{code}-{last4}-{city}' WHERE mark_template = 'D{code}-{last4}'").run();
   // Номера, записанные до новых правил (0555…, 916…, 138…), приводим к международному виду, если такой номер ещё не занят.
   for (const c of db.prepare("SELECT id, phone FROM clients WHERE phone NOT LIKE 'stub-%'").all()) {
     const n = normPhone(c.phone);
@@ -744,7 +746,10 @@ const codeKey = (raw) => { const c = String(raw || '').trim().toUpperCase().repl
 function shippingMark(template, client) {
   const last4 = normPhone(client.phone).slice(-4);
   const code = String(client.code || '');
-  return String(template || 'D{code}-{last4}').replace('D{code}', dispCode(code)).replace('{code}', code.replace(/^#/, '')).replace('{last4}', last4);
+  // {city} — город выдачи латиницей: ALMATY, MOSKVA, BISHKEK; нет города — убираем вместе с дефисом.
+  const city = client.city_name ? require('./seo').slug(client.city_name).toUpperCase() : '';
+  return String(template || 'D{code}-{last4}-{city}').replace('D{code}', dispCode(code)).replace('{code}', code.replace(/^#/, '')).replace('{last4}', last4)
+    .replace(/-?\{city\}/, (m) => (city ? m.replace('{city}', city) : ''));
 }
 
 function addEvent(parcelId, status, comment = '') {
