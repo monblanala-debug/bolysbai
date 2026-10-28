@@ -542,6 +542,27 @@ seed();
     }
     db.exec('COMMIT');
   }
+  // Накладные с кодом через дефис (AM-5250-1025-1), загруженные до 28.10: дата вышла 50.52, клиент — «AM».
+  // Берём из номера код AM-5250 и дату 25.10, переносим к нужному клиенту; пустой клиент «AM» удаляем.
+  for (const inv of db.prepare("SELECT i.*, c.code ccode, c.phone cphone FROM invoices i JOIN clients c ON c.id = i.client_id WHERE substr(i.inv_date, 6, 2) > '12' OR substr(i.inv_date, 9, 2) > '31'").all()) {
+    const m = /^(.+)-(\d{2})(\d{2})-(\d+)$/.exec(String(inv.number || '').trim());
+    if (!m || +m[2] < 1 || +m[2] > 12 || +m[3] < 1 || +m[3] > 31) continue;
+    const code = codeKey(m[1]);
+    let y = +String(inv.created_at || '').slice(0, 4) || new Date().getFullYear();
+    if (`${y}-${m[2]}-${m[3]}` > String(inv.created_at || '').slice(0, 10)) y--;
+    const day = `${y}-${m[2]}-${m[3]}`;
+    db.exec('BEGIN');
+    let target = db.prepare('SELECT id FROM clients WHERE code = ?').get(code);
+    const stubOnly = String(inv.cphone).startsWith('stub-') && !db.prepare('SELECT 1 FROM invoices WHERE client_id = ? AND id != ? AND number NOT LIKE ?').get(inv.client_id, inv.id, `${m[1]}-%`);
+    if (!target && stubOnly) { db.prepare('UPDATE clients SET code = ?, name = ?, phone = ? WHERE id = ?').run(code, code, `stub-${code}`, inv.client_id); target = { id: inv.client_id }; }
+    if (target) {
+      const dup = db.prepare('SELECT id FROM invoices WHERE number = ? AND client_id = ? AND id != ?').get(inv.number, target.id, inv.id);
+      if (dup) { for (const tb of ['payments', 'expenses', 'invoice_photos']) db.prepare(`DELETE FROM ${tb} WHERE invoice_id = ?`).run(inv.id); db.prepare('UPDATE parcels SET invoice_id = NULL WHERE invoice_id = ?').run(inv.id); db.prepare('DELETE FROM invoices WHERE id = ?').run(inv.id); }
+      else db.prepare('UPDATE invoices SET client_id = ?, inv_date = ?, sender = ? WHERE id = ?').run(target.id, day, code, inv.id);
+      if (target.id !== inv.client_id && String(inv.cphone).startsWith('stub-') && !db.prepare('SELECT 1 FROM invoices WHERE client_id = ?').get(inv.client_id) && !db.prepare('SELECT 1 FROM parcels WHERE client_id = ?').get(inv.client_id)) db.prepare('DELETE FROM clients WHERE id = ?').run(inv.client_id);
+    } else db.prepare('UPDATE invoices SET inv_date = ? WHERE id = ?').run(day, inv.id);
+    db.exec('COMMIT');
+  }
   // Маркировка с городом в конце: D1566-7741-ALMATY (если шаблон не меняли).
   db.prepare("UPDATE warehouses SET mark_template = 'D{code}-{last4}-{city}' WHERE mark_template = 'D{code}-{last4}'").run();
   // Номера, записанные до новых правил (0555…, 916…, 138…), приводим к международному виду, если такой номер ещё не занят.
@@ -741,7 +762,7 @@ function nextClientCode() {
 // «Y15», «X40», «AB016» — как есть. dispCode показывает код так, как его пишут люди.
 const dispCode = (code) => { const c = String(code || ''); return c.startsWith('#') ? c.slice(1) : /^\d/.test(c) ? `D${c}` : c; };
 // Из того, что написали в Excel или в форме: D1600 → 1600, 9455 → #9455, y15 → Y15.
-const codeKey = (raw) => { const c = String(raw || '').trim().toUpperCase().replace(/\s+/g, ''); return /^D\d/.test(c) ? c.slice(1) : /^\d/.test(c) ? `#${c}` : c; };
+function codeKey(raw) { const c = String(raw || '').trim().toUpperCase().replace(/\s+/g, ''); return /^D\d/.test(c) ? c.slice(1) : /^\d/.test(c) ? `#${c}` : c; }
 
 function shippingMark(template, client) {
   const last4 = normPhone(client.phone).slice(-4);
