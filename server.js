@@ -935,7 +935,11 @@ app.post('/admin/clients/import', upload.single('file'), (req, res) => {
   if (!isOwner(req) || !req.file) return res.redirect('/admin/clients');
   const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
   const cities = db.prepare('SELECT * FROM cities').all();
-  const findCity = (v) => { const s = String(v || ''); return cities.find((c) => s && (s.includes(c.name) || (CITY_ZH[c.name] && s.includes(CITY_ZH[c.name])))); };
+  // Город по-русски, по-китайски или латиницей из старой базы: Almaty, Astana, Moskva.
+  const lat = (x) => SEO.slug(x).replace(/[^a-z]/g, '');
+  const ALIAS = { almaty: ['almaty', 'alma', 'almati'], moskva: ['moskva', 'moscow', 'moskow'], astana: ['astana', 'nursultan'], bishkek: ['bishkek'] };
+  const findCity = (v) => { const s = String(v || ''); if (!s) return null; const l = lat(s);
+    return cities.find((c) => s.includes(c.name) || (CITY_ZH[c.name] && s.includes(CITY_ZH[c.name])) || (l && (l === lat(c.name) || (ALIAS[lat(c.name)] || []).includes(l)))); };
   let added = 0; let updated = 0; let skipped = 0; const dup = []; const noCity = new Map();
   db.exec('BEGIN');
   for (const name of wb.SheetNames) {
