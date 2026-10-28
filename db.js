@@ -526,6 +526,11 @@ seed();
   upd.run('Нет китайской карты? Оплатим в юанях заказ на 1688, Taobao, Pinduoduo, а также вашему заводу или поставщику — и мелкие, и крупные закупки.', 'promo_text_ru', 'Оплатим заказ на 1688, Taobao, Pinduoduo, пополним Alipay и WeChat в юанях. Напишите — поможем.');
   upd.run('我们帮您在中国付款', 'promo_title_zh', '无法付款给供应商？');
   upd.run('没有中国银行卡？我们用人民币帮您支付 1688、淘宝、拼多多订单，也可以直接付款给工厂或供应商，小额大额采购都可以。', 'promo_text_zh', '我们帮您支付 1688、淘宝、拼多多订单，充值支付宝和微信人民币。');
+  // Номера, записанные до новых правил (0555…, 916…, 138…), приводим к международному виду, если такой номер ещё не занят.
+  for (const c of db.prepare("SELECT id, phone FROM clients WHERE phone NOT LIKE 'stub-%'").all()) {
+    const n = normPhone(c.phone);
+    if (n !== c.phone && n.length >= 10 && !db.prepare('SELECT 1 FROM clients WHERE phone = ?').get(n)) db.prepare('UPDATE clients SET phone = ? WHERE id = ?').run(n, c.id);
+  }
   // Новые «О нас» и «Услуги» вместо стартовых текстов, если их ещё не меняли в настройках.
   const NEW_TEXT = { about_ru: `# Карго 151
 Больше 15 лет доставляем грузы из Китая в СНГ: Казахстан, Кыргызстан, Россия.
@@ -690,11 +695,17 @@ function setting(key) {
   return r ? r.value : '';
 }
 
-// Оставляет только цифры; казахстанский/российский формат 8XXXXXXXXXX приводится к 7XXXXXXXXXX.
+// Номер в международном виде, только цифры, как бы его ни написали:
+// Казахстан/Россия: +7 747…, 8 747…, 747… → 7747…; Россия 916… → 7916…;
+// Кыргызстан: 0555 123 456 или 555 123 456 → 996555123456; Китай: 138 1234 5678 → 8613812345678; 00… → без 00.
 function normPhone(p) {
-  const d = String(p || '').replace(/\D/g, '');
+  let d = String(p || '').replace(/\D/g, '');
+  if (d.startsWith('00')) d = d.slice(2);
   if (d.length === 11 && d[0] === '8') return '7' + d.slice(1);
-  if (d.length === 10 && d[0] === '7') return '7' + d; // 747 123 45 67 без +7
+  if (d.length === 10 && (d[0] === '7' || d[0] === '9')) return '7' + d; // 747 123 45 67, 916 123 45 67 без +7
+  if (d.length === 10 && d[0] === '0') return '996' + d.slice(1); // Кыргызстан: 0555 123 456
+  if (d.length === 9 && /^[2-9]/.test(d)) return '996' + d; // Кыргызстан без 0
+  if (d.length === 11 && d[0] === '1') return '86' + d; // Китай без +86
   return d;
 }
 
