@@ -400,9 +400,11 @@ const PAY_KNOWN = [...PAY_METHODS, 'cny', 'auto', 'cash', 'kaspi'];
 // День оплаты: тот, что указала бухгалтер, иначе день записи (по Китаю).
 const PAY_DAY = "COALESCE(p.paid_on, date(p.created_at, '+8 hours'))";
 const paidSum = (id) => db.prepare('SELECT COALESCE(SUM(amount), 0) s FROM payments WHERE invoice_id = ?').get(id).s;
-const invDebt = (i) => (i.paid ? 0 : Math.max(0, Math.round(((i.amount || 0) - paidSum(i.id)) * 100) / 100));
+// Цену ещё не поставили (нет ни цены, ни фрахта): клиенту вместо суммы — «Цена уточняется», в долги не считаем.
+const noPrice = (i) => !(+i.rate) && !(+i.freight) && !i.paid;
+const invDebt = (i) => (i.paid || noPrice(i) ? 0 : Math.max(0, Math.round(((i.amount || 0) - paidSum(i.id)) * 100) / 100));
 // Долг по накладной i в SQL.
-const DEBT_SQL = 'CASE WHEN i.paid = 1 THEN 0 ELSE MAX(i.amount - (SELECT COALESCE(SUM(p.amount), 0) FROM payments p WHERE p.invoice_id = i.id), 0) END';
+const DEBT_SQL = 'CASE WHEN i.paid = 1 OR (COALESCE(i.rate, 0) = 0 AND COALESCE(i.freight, 0) = 0) THEN 0 ELSE MAX(i.amount - (SELECT COALESCE(SUM(p.amount), 0) FROM payments p WHERE p.invoice_id = i.id), 0) END';
 const payBadge = (t, i) => {
   if (i.paid) return `<span class="badge b-arrived">${esc(t('paid'))}</span>`;
   const p = paidSum(i.id);
@@ -518,15 +520,15 @@ function invoicesTable(t, invoices, base, withPaid = true, canDelete = false) {
     <div class="row" style="align-items:center"><b style="font-size:17px">${esc(i.number)}</b><span class="muted" style="flex:0 0 auto">${esc(fmtDay(i.inv_date || i.created_at))}</span></div>
     <div class="muted" style="margin:4px 0">${esc(cargoSummary(t, i))}${i.cargo_status ? ` · ${esc(cargoStatus(t, i.cargo_status))}` : ''}${i.pc ? ` · 📷 ${i.pc}` : ''}</div>
     <div class="row" style="align-items:center"><div style="flex:0 0 auto">${invBadge(t, i)}
-      ${payBadge(t, i)}</div>
-      <b style="font-size:20px;color:var(--brand);text-align:right">${esc(money(i.amount))}</b></div>
+      ${noPrice(i) ? '' : payBadge(t, i)}</div>
+      ${noPrice(i) ? `<b class="muted" style="text-align:right">${esc(t('price_pending'))}</b>` : `<b style="font-size:20px;color:var(--brand);text-align:right">${esc(money(i.amount))}</b>`}</div>
     <a class="btn sec" style="display:block;text-align:center;margin-top:10px" href="${base}${i.id}">${esc(t('inv_view'))}</a></div>`).join('')}</div>`;
   // Галочки привязаны к отдельной форме (form="bulkinv"), потому что в строках уже есть формы загрузки фото.
   return `<div class="tbl"><table><tr><th><input type="checkbox" id="inv-all" style="width:auto"></th><th>${esc(t('invoice_no'))}</th><th>${esc(t('inv_cargo'))}</th><th>${esc(t('amount'))}</th><th>${esc(t('status'))}</th><th></th><th>✎ ${esc(t('a_inv_note'))}</th></tr>
   ${invoices.map((i, n) => { const d = i.day || String(i.inv_date || i.created_at || '').slice(0, 10); const head = n === 0 || d !== (invoices[n - 1].day || String(invoices[n - 1].inv_date || invoices[n - 1].created_at || '').slice(0, 10));
     const cnt = head ? invoices.filter((x) => (x.day || String(x.inv_date || x.created_at || '').slice(0, 10)) === d).length : 0;
     return `${head ? `<tr class="dayrow"><td><input type="checkbox" class="day-all" data-day="${esc(d)}" style="width:auto"></td><td colspan="6"><b>${esc(fmtDay(d))}</b> <span class="muted">· ${cnt} ${esc(t('a_f_pcs'))}</span></td></tr>` : ''}<tr><td><input type="checkbox" name="ids" value="${i.id}" data-day="${esc(d)}" form="bulkinv" style="width:auto"></td><td><b style="white-space:nowrap">${esc(i.number)}</b>${i.code ? `<div class="muted" style="font-size:13px">${esc(i.name)}</div>` : ''}${noteTag(i.client_note)}</td>
-  <td>${esc(cargoSummary(t, i))}</td><td style="white-space:nowrap"><b>${esc(money(i.amount))}</b></td>
+  <td>${esc(cargoSummary(t, i))}</td><td style="white-space:nowrap"><b>${esc(money(i.amount))}</b>${noPrice(i) ? `<div><span class="badge b-border">${esc(t('a_no_price'))}</span></div>` : ''}</td>
   <td style="min-width:170px"><div style="margin-bottom:4px">${invBadge(t, i)}${lyingTag(t, i)}</div>
     <form method="post" action="/admin/invoices/${i.id}/status" style="margin-bottom:4px"><input type="hidden" name="back" class="back"><select name="inv_status" onchange="this.form.submit()" class="rowsel" title="${esc(t('a_set_status'))}">${invStatusOptions(t, INV_STATUSES.includes(i.inv_status) ? i.inv_status : 'auto')}</select></form>
     ${i.cargo_status ? `<div style="font-size:13px;margin-bottom:4px">${esc(cargoStatus(t, i.cargo_status))}</div>` : ''}${payBadge(t, i)}${creditBadge(t, i)}</td>
@@ -703,16 +705,17 @@ function invoicePage(req, inv) {
   const parcels = db.prepare('SELECT track FROM parcels WHERE invoice_id = ? ORDER BY id').all(inv.id);
   const photos = invoicePhotos(inv.id);
   return `<div class="row noprint" style="align-items:center;margin-bottom:12px"><a href="${req.session.admin ? '/admin/invoices' : '/cabinet'}">← ${esc(t('back'))}</a>
-    ${waClient(req, inv)}<span style="margin-left:auto">${payBadge(t, inv)}</span>
+    ${waClient(req, inv)}<span style="margin-left:auto">${noPrice(inv) ? `<span class="badge b-border">${esc(t(req.session.admin ? 'a_no_price' : 'price_pending'))}</span>` : payBadge(t, inv)}</span>
     ${req.session.admin && canMoney(req) ? `<a class="btn" style="flex:0 0 auto" href="/admin/invoices/${inv.id}/edit">✏️ ${esc(t('edit'))}</a>` : ''}
     <button type="button" class="sec" onclick="print()" style="flex:0 0 auto">${esc(t('print'))}</button></div>
   <p class="muted only-m noprint" style="font-size:13px;margin:0 0 8px">${esc(t('inv_zoom_hint'))}</p>
+  ${noPrice(inv) && !req.session.admin ? `<div class="alert info noprint">${esc(t('price_pending_hint'))}</div>` : ''}
   <div class="wb-fit"><div class="wb wb-sheet">
     <div class="wb-top"><img src="/logo.png" alt="Карго 151"><div><div class="co">${esc(setting('invoice_company'))}</div><div class="ti">${esc(setting('invoice_title'))}</div></div></div>
     <div class="g head">${INV_HEAD.map(cell).join('')}</div>
     <div class="g goods">${INV_GOODS.map(cell).join('')}</div>
     <div class="g sum"><div class="c"><div class="l">备注<br>Замечание</div><div class="v">${esc(inv.note || '')}</div></div>
-      <div class="c"><div class="l">总计<br>Сумма</div><div class="v big">${esc(money(inv.amount))}</div></div></div>
+      <div class="c"><div class="l">总计<br>Сумма</div><div class="v big">${noPrice(inv) && !req.session.admin ? `<span style="font-size:18px">${esc(t('price_pending'))}</span>` : esc(money(inv.amount))}</div></div></div>
     ${inv.cargo_status ? `<div class="wb-tracks"><b>运踪 · ${esc(t('inv_cargo_status'))}:</b> ${esc(cargoStatus(t, inv.cargo_status))}</div>` : ''}
     ${parcels.length ? `<div class="wb-tracks"><b>${esc(t('track'))}:</b> ${parcels.map((p) => esc(p.track)).join(', ')}</div>` : ''}
   </div></div>

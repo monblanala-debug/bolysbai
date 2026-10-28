@@ -765,11 +765,13 @@ const dispCode = (code) => { const c = String(code || ''); return c.startsWith('
 function codeKey(raw) { const c = String(raw || '').trim().toUpperCase().replace(/\s+/g, ''); return /^D\d/.test(c) ? c.slice(1) : /^\d/.test(c) ? `#${c}` : c; }
 
 function shippingMark(template, client) {
-  const last4 = normPhone(client.phone).slice(-4);
+  // У клиента без номера (stub-…) цифр телефона нет — убираем их вместе с дефисом.
+  const stub = String(client.phone || '').startsWith('stub-');
+  const last4 = stub ? '' : normPhone(client.phone).slice(-4);
   const code = String(client.code || '');
   // {city} — город выдачи латиницей: ALMATY, MOSKVA, BISHKEK; нет города — убираем вместе с дефисом.
   const city = client.city_name ? require('./seo').slug(client.city_name).toUpperCase() : '';
-  return String(template || 'D{code}-{last4}-{city}').replace('D{code}', dispCode(code)).replace('{code}', code.replace(/^#/, '')).replace('{last4}', last4)
+  return String(template || 'D{code}-{last4}-{city}').replace('D{code}', dispCode(code)).replace('{code}', code.replace(/^#/, '')).replace(/-?\{last4\}/, (m) => (last4 ? m.replace('{last4}', last4) : ''))
     .replace(/-?\{city\}/, (m) => (city ? m.replace('{city}', city) : ''));
 }
 
