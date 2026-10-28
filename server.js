@@ -894,13 +894,16 @@ app.get('/admin', (req, res) => {
 app.get('/admin/clients', (req, res) => {
   const t = req.t; const q = String(req.query.q || '').trim();
   const like = `%${q}%`; const owner = isOwner(req);
+  // По 300 на страницу; без поиска показываем, сколько всего клиентов.
+  const pg = Math.max(1, parseInt(req.query.page, 10) || 1); const off = (pg - 1) * 300;
+  const total = q ? 0 : db.prepare('SELECT COUNT(*) n FROM clients').get().n;
   // Номер ищем по цифрам: «+7 747 123», «8747123» и «747123» найдут один и тот же телефон.
   const dg = q.replace(/\D/g, ''); const core = normPhone(dg).length >= 11 ? normPhone(dg) : dg.length >= 7 && /^[78]/.test(dg) ? dg.slice(1) : dg;
   const pl = dg.length >= 4 ? `%${core}%` : like;
   const rows = db.prepare(`SELECT c.*, ci.name city_name, (SELECT COUNT(*) FROM parcels p WHERE p.client_id = c.id) pc,
     (SELECT COALESCE(SUM(${DEBT_SQL}), 0) FROM invoices i WHERE i.client_id = c.id) due
     FROM clients c LEFT JOIN cities ci ON ci.id = c.city_id
-    WHERE ? = '' OR c.code LIKE ? OR c.code = ? OR c.code = ? OR c.name LIKE ? OR c.note LIKE ? OR (? AND c.phone LIKE ?) ORDER BY c.id DESC LIMIT 300`).all(q, like, codeKey(q), q.toUpperCase().replace(/^D(?=\d)/, ''), like, like, owner ? 1 : 0, pl);
+    WHERE ? = '' OR c.code LIKE ? OR c.code = ? OR c.code = ? OR c.name LIKE ? OR c.note LIKE ? OR (? AND c.phone LIKE ?) ORDER BY c.id DESC LIMIT 300 OFFSET ?`).all(q, like, codeKey(q), q.toUpperCase().replace(/^D(?=\d)/, ''), like, like, owner ? 1 : 0, pl, off);
   const cities = db.prepare('SELECT * FROM cities ORDER BY id').all();
   adminRender(req, res, t('a_clients'), `<div class="card"><form class="row"><div><input name="q" value="${esc(q)}" placeholder="${esc(t('code'))} / ${esc(t('name'))}${owner ? ' / ' + esc(t('phone')) : ''}"></div><button>${esc(t('search'))}</button></form></div>
   ${owner ? `<details class="card" id="add" ${req.query.code ? 'open' : ''}><summary><b>${esc(t('a_add_client'))}</b></summary><p class="muted">${esc(t('a_add_client_hint'))}</p>
@@ -910,6 +913,7 @@ app.get('/admin/clients', (req, res) => {
   ${owner ? `<details class="card"><summary><b>${esc(t('a_clients_import'))}</b></summary><p class="muted">${esc(t('a_clients_import_hint'))}</p>
     <p><a class="btn sec sm" href="/admin/clients/template.xlsx">⬇️ ${esc(t('a_clients_template'))}</a></p>
     <form method="post" action="/admin/clients/import" enctype="multipart/form-data" class="row"><div><input type="file" name="file" accept=".xlsx,.xls,.csv,.html,.htm" required></div><button>${esc(t('a_upload'))}</button></form></details>` : ''}
+  ${total ? `<p class="muted">${esc(t('a_clients_total'))}: <b>${total}</b>${total > 300 ? ` · ${[...Array(Math.ceil(total / 300)).keys()].map((i) => (i + 1 === pg ? `<b>${i + 1}</b>` : `<a href="/admin/clients?page=${i + 1}">${i + 1}</a>`)).join(' ')}` : ''}</p>` : ''}
   <div class="card tbl"><table><tr><th>${esc(t('code'))}</th><th>${esc(t('name'))}</th>${owner ? `<th>${esc(t('phone'))}</th>` : ''}<th>${esc(t('city'))}</th><th>${esc(t('parcels_count'))}</th>${canMoney(req) ? `<th>${esc(t('a_debts'))}</th>` : ''}${owner ? `<th>${esc(t('registered'))}</th>` : ''}</tr>
   ${rows.map((r) => `<tr><td><a href="/admin/clients/${r.id}"><b>${esc(dispCode(r.code))}</b></a></td><td>${esc(r.name)}${noteTag(r.note)}</td>${owner ? `<td>${isStub(r) ? `<a href="/admin/clients?code=${encodeURIComponent(dispCode(r.code))}#add" class="badge b-border">${esc(t('a_no_phone'))}</a>` : `<a href="https://wa.me/${esc(r.phone)}" target="_blank" rel="noopener">+${esc(r.phone)}</a>`}</td>` : ''}<td>${esc(r.city_name)}</td><td>${r.pc}</td>${canMoney(req) ? `<td style="white-space:nowrap">${r.due > 0.009 ? `<b style="color:var(--brand)">${esc(money(r.due))}</b>` : '<span class="muted">—</span>'}</td>` : ''}${owner ? `<td>${esc(fmtDate(r.created_at))}</td>` : ''}</tr>`).join('')}</table></div>`);
 });
@@ -933,7 +937,11 @@ app.get('/admin/clients/template.xlsx', (req, res) => {
 });
 app.post('/admin/clients/import', upload.single('file'), (req, res) => {
   if (!isOwner(req) || !req.file) return res.redirect('/admin/clients');
-  const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+  // Сохранённая страница старой админки: каждую <table> читаем отдельно (XLSX берёт только первую).
+  const html = /\.html?$/i.test(req.file.originalname || '') || /^\s*(<!doctype html|<html)/i.test(req.file.buffer.slice(0, 200).toString());
+  const tables = html ? req.file.buffer.toString('utf8').match(/<table[\s\S]*?<\/table>/gi) || [] : [];
+  const sheets = tables.length ? tables.map((tb) => { const w = XLSX.read(`<html><body>${tb}</body></html>`, { type: 'string' }); return w.Sheets[w.SheetNames[0]]; })
+    : (() => { const w = XLSX.read(req.file.buffer, { type: 'buffer' }); return w.SheetNames.map((n) => w.Sheets[n]); })();
   const cities = db.prepare('SELECT * FROM cities').all();
   // Город по-русски, по-китайски или латиницей из старой базы: Almaty, Astana, Moskva.
   const lat = (x) => SEO.slug(x).replace(/[^a-z]/g, '');
@@ -942,8 +950,11 @@ app.post('/admin/clients/import', upload.single('file'), (req, res) => {
     return cities.find((c) => s.includes(c.name) || (CITY_ZH[c.name] && s.includes(CITY_ZH[c.name])) || (l && (l === lat(c.name) || (ALIAS[lat(c.name)] || []).includes(l)))); };
   let added = 0; let updated = 0; let skipped = 0; const dup = []; const noCity = new Map();
   db.exec('BEGIN');
-  for (const name of wb.SheetNames) {
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '' });
+  // Русские буквы, похожие на латинские (Х100, У7), приводим к латинским.
+  const LOOK = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', Х: 'X', У: 'Y', З: 'Z' };
+  const fixCode = (v) => String(v || '').trim().toUpperCase().replace(/\s+/g, '').replace(/[АВЕКМНОРСТХУЗ]/g, (c) => LOOK[c]);
+  for (const sheet of sheets) {
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
     let hi = rows.findIndex((r) => r.map(matchClientCol).includes('code'));
     let map = hi >= 0 ? rows[hi].map(matchClientCol) : null;
     if (!map) {
@@ -961,6 +972,7 @@ app.post('/admin/clients/import', upload.single('file'), (req, res) => {
     const okCode = (v) => looksCode(v) || (hi >= 0 && /^\d{1,6}$/.test(String(v || '').trim()));
     for (const row of rows.slice(hi + 1)) {
       const rec = {}; map.forEach((f, i) => { if (f) rec[f] = String(row[i] ?? '').trim(); });
+      if (rec.code) rec.code = fixCode(rec.code);
       if (!okCode(rec.code)) { if (Object.values(rec).some(Boolean)) skipped++; continue; }
       const code = codeKey(rec.code.replace('-', ''));
       const phone = normPhone(rec.phone); const city = findCity(rec.city);
@@ -980,7 +992,7 @@ app.post('/admin/clients/import', upload.single('file'), (req, res) => {
     }
   }
   db.exec('COMMIT');
-  req.session.flash = `${req.t('a_clients_added')}: ${added}, ${req.t('a_clients_updated')}: ${updated}${dup.length ? `. ${req.t('a_clients_dup')}: ${dup.slice(0, 30).join(', ')}` : ''}`
+  req.session.flash = `${req.t('a_clients_added')}: ${added}, ${req.t('a_clients_updated')}: ${updated}${dup.length ? `. ${req.t('a_clients_dup')} (${dup.length}): ${dup.slice(0, 30).join(', ')}${dup.length > 30 ? '…' : ''}` : ''}`
     + (skipped ? `. ${req.t('a_clients_skipped')}: ${skipped}` : '')
     + (noCity.size ? `. ${req.t('a_clients_nocity')}: ${[...noCity].slice(0, 15).map(([c, n]) => `${c} (${n})`).join(', ')}` : '');
   res.redirect('/admin/clients');
@@ -1770,7 +1782,8 @@ function logLater(req, res) {
   res.redirect = (...a) => {
     const d = { n: ids.length || undefined, st: b.inv_status || undefined, ps: b.status || undefined, paid: b.paid || undefined, amount: b.amount || undefined,
       method: b.method || undefined, cur: b.currency === 'CNY' ? '¥' : undefined, day: b.paid_on || b.spent_on || undefined, del: b.delivered === '1' || undefined, note: String(b.staff_note ?? b.note ?? '').slice(0, 200) || undefined, role: b.role || undefined,
-      file: req.file ? req.file.originalname : (req.files || []).length ? `${req.files.length} фото` : undefined, flash: req.session && req.session.flash ? String(req.session.flash).slice(0, 300) : undefined };
+      // multer отдаёт имя файла в latin1 — возвращаем кириллицу.
+      file: req.file ? Buffer.from(req.file.originalname, 'latin1').toString('utf8') : (req.files || []).length ? `${req.files.length} фото` : undefined, flash: req.session && req.session.flash ? String(req.session.flash).slice(0, 300) : undefined };
     try { db.prepare('INSERT INTO audit_log (staff, role, action, target, detail) VALUES (?, ?, ?, ?, ?)').run(staffWho(req), req.session.admin || '', action, target, JSON.stringify(d)); } catch {}
     return redirect(...a);
   };
