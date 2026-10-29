@@ -20,7 +20,7 @@ const isOwner = (req) => req.session.admin === 'owner';
 // Кто куда может зайти в админке: первое совпавшее правило, иначе — владелец и бухгалтер.
 const ALL = ROLES; const MONEY = ['owner', 'accountant']; const OWNER = ['owner'];
 const ACL = [
-  [/^(GET|POST) \/(settings|backup)/, OWNER], [/^POST \/clients\/(import|add)$/, OWNER], [/^POST \/invoices\/\d+\/delete$/, OWNER],
+  [/^(GET|POST) \/(settings|backup)/, OWNER], [/^POST \/clients\/(import|add)$/, OWNER], [/^POST \/clients\/\d+\/delete$/, OWNER], [/^POST \/invoices\/\d+\/delete$/, OWNER],
   [/^GET \/(log|daily)/, OWNER], [/^POST \/invoices\/\d+\/(payments|expenses)\/\d+\/delete$/, OWNER],
   [/^GET \/photos$/, ALL],
   [/^POST \/import-scan$/, ALL], [/^POST \/invoices\/\d+\/photos(\/\d+\/delete)?$/, ALL],
@@ -1076,7 +1076,40 @@ app.get('/admin/clients/:id', (req, res) => {
     ${pays.length ? `<div class="card tbl"><h2>${esc(t('a_payments'))}</h2>${paymentsTable(req, pays, true)}</div>` : ''}` : ''}
     <div class="card"><h2>${esc(t('a_parcels'))}</h2>${parcelsTable(req, parcels)}</div>
     <div class="card"><h2>${esc(t('a_invoices'))}</h2>${invoicesTable(t, invoices, '/admin/invoices/', canMoney(req))}
-    ${canMoney(req) ? `<p><a class="btn" href="/admin/invoices/new?code=${encodeURIComponent(client.code)}">${esc(t('a_new_invoice'))}</a></p>` : ''}</div>`);
+    ${canMoney(req) ? `<p><a class="btn" href="/admin/invoices/new?code=${encodeURIComponent(client.code)}">${esc(t('a_new_invoice'))}</a></p>` : ''}</div>
+    ${isOwner(req) ? `<div class="card"><h2>🗑 ${esc(t('a_cl_del'))}</h2><p class="muted">${esc(t(invoices.length ? 'a_cl_del_move' : 'a_cl_del_hint'))}</p>
+      <form method="post" action="/admin/clients/${client.id}/delete" class="row" style="align-items:flex-end" onsubmit="return confirm('${esc(t('a_cl_del_confirm'))}')">
+      <div><label>${esc(t('a_cl_del_to'))}${invoices.length ? '' : ` <span class="muted" style="font-weight:400">· ${esc(t('a_optional'))}</span>`}</label><input name="to" placeholder="D1600" ${invoices.length ? 'required' : ''}></div>
+      <button class="sec" style="flex:0 0 auto">${esc(t('a_cl_del'))}</button></form></div>` : ''}`);
+});
+// Удалить клиента (например, взял второй код). Накладные и оплаты не теряем: переносим на другой код.
+// Без накладных можно удалить и без переноса — его посылки уйдут в «Посылки без клиента».
+app.post('/admin/clients/:id/delete', (req, res) => {
+  const client = getClient(parseInt(req.params.id, 10));
+  if (!client) return res.redirect('/admin/clients');
+  const found = String(req.body.to || '').trim() ? findClientByCode(String(req.body.to).trim(), true) : null;
+  const to = found ? getClient(found.id) : null;
+  const hasInv = db.prepare('SELECT 1 FROM invoices WHERE client_id = ?').get(client.id);
+  if ((String(req.body.to || '').trim() && !to) || (to && to.id === client.id) || (hasInv && !to)) {
+    req.session.flash = req.t(to && to.id === client.id ? 'a_cl_del_same' : 'a_cl_del_nocode');
+    return res.redirect(`/admin/clients/${client.id}`);
+  }
+  db.exec('BEGIN');
+  try {
+  if (to) {
+    for (const tb of ['invoices', 'parcels', 'forward_requests']) db.prepare(`UPDATE ${tb} SET client_id = ? WHERE client_id = ?`).run(to.id, client.id);
+    db.prepare('UPDATE parcels SET client_code = ? WHERE client_id = ?').run(to.code, to.id);
+    db.prepare('UPDATE invoices SET sender = ? WHERE client_id = ?').run(dispCode(to.code), to.id);
+    if (client.note) db.prepare("UPDATE clients SET note = TRIM(COALESCE(note, '') || ' ' || ?) WHERE id = ?").run(`${dispCode(client.code)}: ${client.note}`.slice(0, 500), to.id);
+  } else {
+    db.prepare('UPDATE parcels SET client_id = NULL, client_code = NULL WHERE client_id = ?').run(client.id);
+    db.prepare('DELETE FROM forward_requests WHERE client_id = ?').run(client.id);
+  }
+  db.prepare('DELETE FROM clients WHERE id = ?').run(client.id);
+  db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  req.session.flash = `${req.t('a_cl_deleted')}: ${dispCode(client.code)}${to ? ` → ${dispCode(to.code)}` : ''}`;
+  res.redirect(to ? `/admin/clients/${to.id}` : '/admin/clients');
 });
 
 function parcelsTable(req, parcels) {
